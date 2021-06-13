@@ -8,8 +8,8 @@ from tqdm import tqdm
 
 
 # takes questions vocab and GloVe text and returns tensor containing weights
-def get_glove_embeddings(path, question_vocab):
-    with open(path, 'r') as file:
+def get_glove_embeddings(path, question_vocab, save_path):
+    with open('%s.txt' % path, 'r') as file:
         text = file.read().split('\n')  # each starts with the character and following it its values
 
     # extract words and features from text file
@@ -24,9 +24,11 @@ def get_glove_embeddings(path, question_vocab):
         if word in word_to_features.keys():
             temp = torch.tensor([word_to_features[word]])
         else:
-            temp = torch.zeros((1, 50))
+            temp = torch.zeros((1, 300))
 
         glove_embeddings = torch.cat((glove_embeddings, temp))
+
+    torch.save(glove_embeddings, '%s.pth' % save_path)
 
     return glove_embeddings
 
@@ -43,9 +45,16 @@ def make_vocab(questions, tokenizer):
 
 def get_collate_fn(pad_value):
     def generate_padding(batch):
-        qu, im, ans = batch
-        qu = pad_sequence(qu, padding_value=pad_value)
+        qu_list, im_list, ans_list = [], [], []
+        for qu, im, ans in batch:
+            qu_list.append(qu)
+            im_list.append(im)
+            ans_list.append(ans)
 
-        return qu, im, ans, qu==True
+        qu = pad_sequence(qu_list, padding_value=pad_value).permute(1, 0)
+
+        return qu, torch.stack(im_list, dim=0), torch.tensor(ans_list, dtype=torch.long), (qu == pad_value)
 
     return generate_padding
+
+

@@ -6,6 +6,7 @@ from torchtext.data.utils import get_tokenizer
 
 import os
 import json
+import numpy as np
 from PIL import Image
 from glob import glob
 
@@ -28,9 +29,11 @@ class VQA(Dataset):
         self.tokenizer = get_tokenizer('basic_english')
 
         # default paths
-        annotations_path = ['v2_mscoco_train2014_annotations.json', 'val']
-        questions_path = ['v2_OpenEnded_mscoco_train2014_questions.json', 'val']
-        images_path = ['train2014', 'val']
+        annotations_path = ['annotations/v2_mscoco_train2014_annotations.json',
+                            'annotations/v2_mscoco_val2014_annotations.json']
+        questions_path = ['questions/v2_OpenEnded_mscoco_train2014_questions.json',
+                          'questions/v2_OpenEnded_mscoco_val2014_questions.json']
+        images_path = ['mscoco_imgfeat/train2014', 'mscoco_imgfeat/val2014']
 
         self.annotations = []
         for path in annotations_path:
@@ -65,8 +68,6 @@ class VQA(Dataset):
                     self.images[str(image_id)] = image_path
                 print('%s loaded to images' % path, end=' | ')
 
-        print('images loaded')
-
         # dictionary mapping each answer to its index
         self.answer2index = self.answer_bank()
 
@@ -76,9 +77,9 @@ class VQA(Dataset):
         qu_id, im_id, ans_idx = self.data[idx]
 
         question = self.questions[qu_id]
-        image = Image.open(self.images[im_id])
+        image = torch.tensor(np.load(self.images[im_id]), dtype=torch.float)
 
-        return question, image, ans_idx
+        return question, image, int(ans_idx)
 
     def __len__(self):
         return len(self.data)

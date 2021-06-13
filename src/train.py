@@ -1,6 +1,7 @@
 import torch
 import torch.nn.functional as F
 from torch.utils import data
+from torch.cuda import amp
 
 import os
 from argparse import ArgumentParser
@@ -22,12 +23,20 @@ def main(args):
     )
 
     # load glove embeddings
-    glove_embeddings = get_glove_embeddings(args.glove, train_set.vocab)
+    if os.path.exists('%s.pth' % args.glove):
+        glove_embeddings = torch.load('%s.pth' % args.glove)
+    else:
+        glove_embeddings = get_glove_embeddings(args.glove, train_set.vocab, args.glove)
 
-    model = New_Net(num_classes=args.num_classes, d_model=args.d_model, dropout=args.dropout,
-                    word_embedding=glove_embeddings, num_layers=args.num_layers, num_heads=args.num_heads)
+    model = New_Net(num_classes=len(train_set.answer2index), d_model=args.d_model, dropout=args.dropout,
+                    word_embedding=glove_embeddings, num_layers=args.num_layers, num_heads=args.num_heads).cuda()
 
-    optimizer = torch.optim.SGD(params=model.paramaters(), lr=args.lr)
+    num_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print('\nmodel has %dM parameters' % (num_parameters // 1000000))
+
+    optimizer = torch.optim.Adam(params=model.parameters(), lr=args.lr)
+
+    scaler = amp.GradScaler()
 
     epoch = 1
     if args.resume:
@@ -35,29 +44,45 @@ def main(args):
             checkpoint = torch.load(args.resume)
             model.load_state_dict(checkpoint['state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer'])
+            scaler.load_state_dict(checkpoint['scaler'])
             epoch = checkpoint['epoch'] + 1
 
     for e in range(epoch, args.epochs):
-        train(model, optimizer, train_loader)
+        train(model, optimizer, scaler, train_loader, e, args)
+        checkpoint = {
+            'state_dict': model.state_dict(),
+            'optimizer': optimizer.state_dict(),
+            'scaler': scaler.state_dict(),
+            'epoch': e
+        }
+        torch.save(checkpoint, './checkpoint.pth')
 
 
-def train(model, optimizer, train_loader):
-    for qu, im, label, mask in train_loader:
+def train(model, optimizer, scaler, train_loader, epoch, args):
+    total_loss = 0.
+    for i, (qu, im, label, mask) in enumerate(train_loader):
         qu = qu.cuda()
         im = im.cuda()
         label = label.cuda()
         mask = mask.cuda()
 
-        output = model(qu, im, mask)
-
-        loss = F.cross_entropy(output, label)
+        with amp.autocast():
+            output = model(qu, im, mask)
+            loss = F.cross_entropy(output, label)
 
         # optimize
         optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
 
-        print('loss: %f' % loss.item())
+        total_loss += loss.item()
+
+        if i % 24 == 0 and i != 0:
+            print('epoch [%3d/%3d][%3d/%3d], loss: %f, lr: %f' % (
+                epoch, args.epochs, i, train_loader.__len__(), total_loss / 24,
+                args.lr))
+            total_loss = 0.0
 
 
 # data related
@@ -74,3 +99,7 @@ arg_parser.add_argument('--dropout', type=float, default=.2, help='dropout proba
 # training related
 arg_parser.add_argument('--epochs', type=int, default=100, help='number of training epochs')
 arg_parser.add_argument('--resume', type=str, default='', help='path to latest checkpoint')
+
+arguments = arg_parser.parse_args()
+
+main(arguments)
