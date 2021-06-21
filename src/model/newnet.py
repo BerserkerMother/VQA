@@ -16,7 +16,7 @@ class New_Net(nn.Module):
         self.d_model = d_model
         self.num_heads = num_heads
 
-        self.embedding = Embedding(d_model, word_embedding)
+        self.embedding = Embedding(d_model, word_embedding, dropout)
 
         # image change dim module
         self.image_fc = nn.Linear(2048, d_model)
@@ -115,9 +115,9 @@ class MultiHeadAttention(nn.Module):
         # input: tensor(B, num_obj, d_model)
 
         assert d_model % num_heads == 0
-        self.d_model = d_model // num_heads
+        self.head_size = d_model // num_heads
         self.num_heads = num_heads
-        self.hidden_size = d_model
+        self.d_model = d_model
 
         # q k v linear projections
         self.q = nn.Linear(d_model, d_model)
@@ -131,16 +131,17 @@ class MultiHeadAttention(nn.Module):
     def forward(self, q, k, v, mask):
         batch_size = q.size()[0]
 
-        q = self.q(q).view(batch_size, -1, self.num_heads, self.d_model).permute(0, 2, 1, 3)
-        k = self.k(k).view(batch_size, -1, self.num_heads, self.d_model).permute(0, 2, 1, 3)
-        v = self.v(v).view(batch_size, -1, self.num_heads, self.d_model).permute(0, 2, 1, 3)
-        scores = torch.matmul(q, k.transpose(2, 3)) / math.sqrt(self.d_model)
-        scores[mask] = float('-inf')
+        q = self.q(q).view(batch_size, -1, self.num_heads, self.head_size).permute(0, 2, 1, 3)
+        k = self.k(k).view(batch_size, -1, self.num_heads, self.head_size).permute(0, 2, 1, 3)
+        v = self.v(v).view(batch_size, -1, self.num_heads, self.head_size).permute(0, 2, 1, 3)
+        scores = torch.matmul(q, k.transpose(2, 3)) / math.sqrt(self.head_size)
+        scores = scores.masked_fill(mask, (float('-inf')))
 
         attention_weights = F.softmax(scores, dim=3)
+        attention_weights = self.dropout(attention_weights)
 
         attended_features = torch.matmul(attention_weights, v)
-        attended_features = attended_features.permute(0, 2, 1, 3).contiguous().view(batch_size, -1, self.hidden_size)
+        attended_features = attended_features.permute(0, 2, 1, 3).contiguous().view(batch_size, -1, self.d_model)
 
         attended_features = self.linear(attended_features)
 
@@ -193,9 +194,9 @@ class PositionalEncoding(nn.Module):
         div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
         pe[:, 0::2] = torch.sin(position * div_term)
         pe[:, 1::2] = torch.cos(position * div_term)
-        pe = pe.unsqueeze(0).transpose(0, 1)
+        pe = pe.unsqueeze(0)
         self.register_buffer('pe', pe)
 
     def forward(self, x):
-        x = x + self.pe[:x.size(0), :]
+        x = x + self.pe[:, x.size()[1]]
         return x

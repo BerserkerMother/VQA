@@ -4,15 +4,32 @@ from torch.utils import data
 from torch.cuda import amp
 
 import os
+import json
+import datetime
+import pandas as pd
 from argparse import ArgumentParser
+from tqdm import tqdm
 
 from data import VQA, get_collate_fn, get_glove_embeddings
 from model import New_Net
+from utils import AverageMeter, correct, get_current_lr
 
 
 def main(args):
+    # result purposes
+    if not os.path.exists(args.save):
+        os.mkdir(args.save)
+    date = datetime.datetime.now().__str__()
+    path = os.path.join(args.save, date)
+    os.mkdir(path)
+    with open(path + '/args.json', 'w') as f:
+        json.dump(args.__dict__, f)
+    results = {'epoch': [], 'loss': [], 'lr': [], 'acc@1': [], 'acc@5': []}
+    args.save = path
+
+    # create data loader
     train_set = VQA(args.data)
-    pad_value = train_set.vocab.stoi['<pad>']
+    pad_value = train_set.vocab_stoi['<pad>']
     collate_fn = get_collate_fn(pad_value)
     train_loader = data.DataLoader(
         dataset=train_set,
@@ -45,20 +62,34 @@ def main(args):
             model.load_state_dict(checkpoint['state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer'])
             scaler.load_state_dict(checkpoint['scaler'])
+            results = checkpoint['results']
             epoch = checkpoint['epoch'] + 1
 
     for e in range(epoch, args.epochs):
-        train(model, optimizer, scaler, train_loader, e, args)
+        loss = train(model, optimizer, scaler, train_loader, e, args)
+        acc1, acc5 = val(model, train_loader)
+
+        # append results
+        results['epoch'].append(e)
+        results['loss'].append(loss)
+        results['acc@1'].append(acc1)
+        results['acc@5'].append(acc5)
+        results['lr'].append(get_current_lr(optimizer))
+
         checkpoint = {
             'state_dict': model.state_dict(),
             'optimizer': optimizer.state_dict(),
             'scaler': scaler.state_dict(),
+            'results': results,
             'epoch': e
         }
-        torch.save(checkpoint, './checkpoint.pth')
+        torch.save(checkpoint, '%s/checkpoint.pth' % args.save)
+        pd.DataFrame(results, index=range(1, e + 1)).to_csv('%s/log.csv' % args.save, index_label='epoch')
 
 
 def train(model, optimizer, scaler, train_loader, epoch, args):
+    model.train()
+    loss_meter = AverageMeter()
     total_loss = 0.
     for i, (qu, im, label, mask) in enumerate(train_loader):
         qu = qu.cuda()
@@ -81,8 +112,36 @@ def train(model, optimizer, scaler, train_loader, epoch, args):
         if i % 24 == 0 and i != 0:
             print('epoch [%3d/%3d][%3d/%3d], loss: %f, lr: %f' % (
                 epoch, args.epochs, i, train_loader.__len__(), total_loss / 24,
-                args.lr))
+                get_current_lr(optimizer)))
+            loss_meter.update(total_loss)
             total_loss = 0.0
+
+    return loss_meter.avg()
+
+
+def val(model, loader):
+    model.eval()
+    top1, top5 = AverageMeter(), AverageMeter()
+
+    print('evaluating...')
+    for qu, im, label, mask in tqdm(loader):
+        batch_size = qu.size(0)
+
+        qu = qu.cuda()
+        im = im.cuda()
+        label = label.cuda()
+        mask = mask.cuda()
+
+        with torch.no_grad():
+            output = model(qu, im, mask)
+
+            results = correct(output, label, topk=(1, 5))
+
+            top1.update(results['acc1'], batch_size)
+            top5.update(results['acc5'], batch_size)
+
+    print('top1 acc: %.2f | top5 acc: %.2f' % (top1.avg() * 100, top5.avg() * 100))
+    return results['acc1'], results['acc5']
 
 
 # data related
@@ -98,6 +157,7 @@ arg_parser.add_argument('--lr', type=float, default=1e-3, help='optimizer learni
 arg_parser.add_argument('--dropout', type=float, default=.2, help='dropout probability')
 # training related
 arg_parser.add_argument('--epochs', type=int, default=100, help='number of training epochs')
+arg_parser.add_argument('--save', type=str, default='./run', help='path to save directory')
 arg_parser.add_argument('--resume', type=str, default='', help='path to latest checkpoint')
 
 arguments = arg_parser.parse_args()

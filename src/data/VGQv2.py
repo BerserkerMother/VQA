@@ -25,7 +25,6 @@ class VQA(Dataset):
         """
         self.root = root
 
-        self.vocab = Vocab(Counter())
         self.tokenizer = get_tokenizer('basic_english')
 
         # default paths
@@ -57,6 +56,7 @@ class VQA(Dataset):
                 print('%s loaded to questions' % path, end=' | ')
         print('questions loaded')
         self.vocab = make_vocab(self.questions, self.tokenizer)
+        self.vocab_stoi = self.vocab.get_stoi()
         self.questions = self.questions_as_tensor()
 
         self.images = {}
@@ -89,7 +89,7 @@ class VQA(Dataset):
         temp = {}
         for qu_id in self.questions:
             qu = self.questions[qu_id]
-            temp[qu_id] = torch.tensor([self.vocab.stoi[word] for word in self.tokenizer(qu)], dtype=torch.long)
+            temp[qu_id] = torch.tensor([self.vocab_stoi[word] for word in self.tokenizer(qu)], dtype=torch.long)
 
         return temp
 
