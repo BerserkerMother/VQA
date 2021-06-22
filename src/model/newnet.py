@@ -173,12 +173,14 @@ class Embedding(nn.Module):
         # word embedding
         num_emd, emd_dim = word_embedding.size()
         self.word_embedding = nn.Embedding(num_emd, emd_dim, _weight=word_embedding)
+        self.qu_fc = nn.Linear(emd_dim, d_model)
         self.pos_embedding = PositionalEncoding(d_model)
 
         self.dropout = nn.Dropout(p=dropout)
 
     def forward(self, x):
         x = self.word_embedding(x)
+        x = self.qu_fc(x)
         x = self.pos_embedding(x)
 
         return self.dropout(x)
