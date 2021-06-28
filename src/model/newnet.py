@@ -7,12 +7,16 @@ import math
 
 class New_Net(nn.Module):
     def __init__(self, num_classes, d_model, dropout, word_embedding, num_layers, num_heads):
-        super(New_Net, self).__init__()
+        """
 
+        :param num_classes: num of decoder output features
+        :param d_model: model dimension
+        :param dropout: dropout probability
+        :param word_embedding: glove word embedding tensor
+        :param num_layers: encoder number of layers, same for both encoders
+        :param num_heads: number of heads in multi head attention
         """
-        for question part we going to need a transformer encoder, thus transformer encoder layer
-        for image and vision together we going to need transformer encoder again
-        """
+        super(New_Net, self).__init__()
         self.d_model = d_model
         self.num_heads = num_heads
 
@@ -37,6 +41,13 @@ class New_Net(nn.Module):
         self.decoder = nn.Linear(d_model, num_classes)
 
     def forward(self, questions, images_features, mask):
+        """
+
+        :param questions: question batch of size (batch_size, question_length, embedding dim)
+        :param images_features: image features of size(batch_size, num_objects=36, 2048)
+        :param mask: question padding mask, same size as question
+        :return:
+        """
         batch_size, quN = questions.size()[:2]
         imN = images_features.size()[1]
 
@@ -66,6 +77,14 @@ class New_Net(nn.Module):
         return output
 
     def generate_masks(self, mask, batch_size, quN, imN):
+        """
+
+        :param mask: question mask
+        :param batch_size:
+        :param quN: question length
+        :param imN: num image objects
+        :return: given input, outputs resized and expanded mask for question and qu&im encoder
+        """
 
         mask = mask.view(batch_size, 1, quN, 1)
         # generate question mask

@@ -10,7 +10,7 @@ import pandas as pd
 from argparse import ArgumentParser
 from tqdm import tqdm
 
-from data import VQA, get_collate_fn, get_glove_embeddings
+from data import VQA, get_collate_fn, get_glove_embeddings, dataset_random_split
 from model import New_Net
 from utils import AverageMeter, correct, get_current_lr
 
@@ -32,15 +32,16 @@ def main(args):
     dataset = VQA(args.data)
     args.num_classes = len(dataset.answer2index)
     pad_value = dataset.vocab_stoi['<pad>']
-    len_data = dataset.__len__()
-    train_samples = int(len_data * .8)
-    train_set, test_set = data.random_split(dataset, [train_samples, len_data - train_samples])
+    # split dataset to train and test set
+    train_set, test_set = dataset_random_split(dataset, ratio=.8, seed=0)
+    # gets collate function for data loader
     collate_fn = get_collate_fn(pad_value)
     train_loader = data.DataLoader(
         dataset=train_set,
         batch_size=args.batch_size,
         shuffle=True,
         collate_fn=collate_fn,
+        num_workers=2,
         pin_memory=True
     )
 
@@ -49,13 +50,14 @@ def main(args):
         batch_size=args.batch_size,
         shuffle=True,
         collate_fn=collate_fn,
+        num_workers=2,
         pin_memory=True
     )
     # load glove embeddings
     if os.path.exists('%s.pth' % args.glove):
         glove_embeddings = torch.load('%s.pth' % args.glove)
     else:
-        glove_embeddings = get_glove_embeddings(args.glove, train_set.vocab, args.glove)
+        glove_embeddings = get_glove_embeddings(args.glove, dataset.vocab, args.glove)
 
     model = New_Net(num_classes=args.num_classes, d_model=args.d_model, dropout=args.dropout,
                     word_embedding=glove_embeddings, num_layers=args.num_layers, num_heads=args.num_heads).cuda()
@@ -87,10 +89,10 @@ def main(args):
             epoch = checkpoint['epoch'] + 1
 
     for e in range(epoch, args.epochs):
-        train_loss, train_acc = train(model, optimizer, scaler, train_loader, e, args)
+        train_loss, train_acc = train(model, optimizer, scaler, train_loader, pad_value, e, args)
         test_loss, test_acc = None, None
         if args.eval:
-            test_loss, test_acc = val(model, test_loader)
+            test_loss, test_acc = val(model, test_loader, pad_value)
 
         # append results
         results['loss/train'].append(train_loss)
@@ -100,11 +102,9 @@ def main(args):
         results['lr'].append(get_current_lr(optimizer))
 
         # tensorboard logging
-        writer.add_scalar('loss/train', scalar_value=train_loss, global_step=epoch)
-        writer.add_scalar('acc/train', scalar_value=train_acc, global_step=epoch)
-        writer.add_scalar('loss/test', scalar_value=test_loss, global_step=epoch)
-        writer.add_scalar('acc/test', scalar_value=test_acc, global_step=epoch)
-        writer.add_scalar('lr', scalar_value=get_current_lr(optimizer), global_step=epoch)
+        writer.add_scalars('acc', {'train': train_acc, 'test': test_acc}, global_step=e)
+        writer.add_scalars('loss', {'train': train_loss, 'test': test_loss}, global_step=e)
+        writer.add_scalar('lr', scalar_value=get_current_lr(optimizer), global_step=e)
 
         checkpoint = {
             'state_dict': model.state_dict(),
@@ -119,17 +119,16 @@ def main(args):
         scheduler.step()
 
 
-def train(model, optimizer, scaler, train_loader, epoch, args):
-    top1 = AverageMeter()
+def train(model, optimizer, scaler, train_loader, pad_value, epoch, args):
     model.train()
-    loss_meter = AverageMeter()
-    total_loss = 0.
-    for i, (qu, im, label, mask) in enumerate(train_loader):
+    loss_meter, top1, total_loss = AverageMeter(), AverageMeter(), 0.
+    for i, batch in enumerate(train_loader):
+        qu = batch.qu.cuda(non_blocking=True)
+        im = batch.im.cuda(non_blocking=True)
+        label = batch.ans.cuda(non_blocking=True)
+        mask = (qu == pad_value)
+
         batch_size = qu.size()[0]
-        qu = qu.cuda()
-        im = im.cuda()
-        label = label.cuda()
-        mask = mask.cuda()
 
         with amp.autocast():
             output = model(qu, im, mask)
@@ -156,19 +155,18 @@ def train(model, optimizer, scaler, train_loader, epoch, args):
     return loss_meter.avg(), top1.avg() * 100
 
 
-def val(model, loader):
+def val(model, loader, pad_value):
     model.eval()
-    top1 = AverageMeter()
-    loss_meter = AverageMeter()
+    top1, loss_meter = AverageMeter(), AverageMeter()
 
     print('evaluating...')
-    for qu, im, label, mask in tqdm(loader):
-        batch_size = qu.size()[0]
+    for batch in tqdm(loader):
+        qu = batch.qu.cuda(non_blocking=True)
+        im = batch.im.cuda(non_blocking=True)
+        label = batch.ans.cuda(non_blocking=True)
+        mask = (qu == pad_value)
 
-        qu = qu.cuda()
-        im = im.cuda()
-        label = label.cuda()
-        mask = mask.cuda()
+        batch_size = qu.size()[0]
 
         with torch.no_grad():
             output = model(qu, im, mask)

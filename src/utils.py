@@ -1,3 +1,7 @@
+from torch.utils.tensorboard import SummaryWriter
+import pandas as pd
+
+
 class AverageMeter:
     def __init__(self):
         self.sum = 0.
@@ -33,3 +37,14 @@ def correct(output, target, topk=(1,)):
 def get_current_lr(optimizer):
     for param_group in optimizer.param_groups:
         return param_group['lr']
+
+
+def csv_to_tensorboard():
+    writer = SummaryWriter('tb')
+    data_frame = pd.read_csv('log.csv')
+    for index, row in data_frame.iterrows():
+        writer.add_scalars('acc', {'train': row['acc/train'], 'test': row['acc/test']}, global_step=index)
+        writer.add_scalars('loss', {'train': row['loss/train'], 'test': row['loss/test']}, global_step=index)
+        writer.add_scalar('lr', scalar_value=row['lr'], global_step=index + 1)
+
+    writer.close()
