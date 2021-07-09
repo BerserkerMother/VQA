@@ -26,11 +26,15 @@ def tsv_to_npy(path, save_path):
             boxes = int(item['num_boxes'])
 
             im_id = item['img_id']
+            loc = np.frombuffer(base64.b64decode(item['boxes']), dtype=np.float32)
+            loc = loc.reshape(boxes, 4)
+            loc.setflags(write=False)
             array = np.frombuffer(base64.b64decode(item['features']), dtype=np.float32)
             array = array.reshape(boxes, -1)
             array.setflags(write=False)
 
             np.save('%s/%s.npy' % (save_path, im_id), array)
+            np.save('%s/%sl.npy' % (save_path, im_id), loc)
     elapsed_time = time.time() - start_time
     print("Converted Image Features in file %s in %d seconds." % (path, elapsed_time))
 

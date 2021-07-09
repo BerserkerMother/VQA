@@ -16,7 +16,7 @@ class VQA(Dataset):
     dataset contains a dictionary {question id, question}, {image id, image_path}, {question id image id: answer}
     """
 
-    def __init__(self, root: str, min_ans_freq: int = 10):
+    def __init__(self, root: str, min_ans_freq: int = 10, max_qu_length: int = 14):
         """
 
         :param root: path to root of which datasets are stored
@@ -24,6 +24,7 @@ class VQA(Dataset):
         """
         self.root = root
         self.min_ans_freq = min_ans_freq
+        self.max_qu_length = max_qu_length
 
         self.tokenizer = get_tokenizer('basic_english')
 
@@ -64,8 +65,9 @@ class VQA(Dataset):
             path = os.path.join(self.root, path)
             if os.path.exists(path):
                 for image_path in glob(path + '/*'):
-                    image_id = int(image_path.split('/')[-1].split('_')[-1].split('.')[0])
-                    self.images[str(image_id)] = image_path
+                    image_id = image_path.split('/')[-1].split('_')[-1].split('.')[0]
+                    if image_id[-1] != 'l':
+                        self.images[str(int(image_id))] = image_path
                 print('%s loaded to images' % path, end=' | ')
         print('images loaded')
 
@@ -84,8 +86,9 @@ class VQA(Dataset):
 
         question = self.questions[qu_id]
         image = torch.tensor(np.load(self.images[im_id]), dtype=torch.float)
+        image_box = torch.tensor(np.load('%sl.npy' % (self.images[im_id][:-4])), dtype=torch.float)
 
-        return question, image, int(ans_idx)
+        return question, image, image_box, int(ans_idx)
 
     def __len__(self):
         return len(self.data)
@@ -131,9 +134,10 @@ class VQA(Dataset):
 
             if answer in self.answer2index.keys():
                 answer_id = self.answer2index[answer]
-                question_id = item['question_id']
-                image_id = item['image_id']
+                question_id = str(item['question_id'])
+                image_id = str(item['image_id'])
 
-                data.append((str(question_id), str(image_id), answer_id))
+                if len(self.questions[question_id]) <= self.max_qu_length:
+                    data.append((question_id, image_id, answer_id))
 
         return data
