@@ -34,6 +34,15 @@ def correct(output, target, topk=(1,)):
     return results
 
 
+def get_sch_fn():
+    def schedule_fn(x):
+        if x > 9:
+            return 1 / 5
+        else:
+            return 1.0
+    return sch_fn
+
+
 def get_current_lr(optimizer):
     for param_group in optimizer.param_groups:
         return param_group['lr']

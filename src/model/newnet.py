@@ -180,11 +180,11 @@ class MultiHeadAttention(nn.Module):
 
 
 class MLP(nn.Module):
-    def __init__(self, d_model, dropout):
+    def __init__(self, d_model, dropout, scale=2):
         super(MLP, self).__init__()
 
-        self.fc1 = nn.Linear(d_model, 4 * d_model)
-        self.fc2 = nn.Linear(4 * d_model, d_model)
+        self.fc1 = nn.Linear(d_model, scale * d_model)
+        self.fc2 = nn.Linear(scale * d_model, d_model)
 
         self.dropout = nn.Dropout(p=dropout)
 
@@ -208,14 +208,12 @@ class ImageEmbedding(nn.Module):
         self.im_norm = nn.LayerNorm(d_model)
         self.p_norm = nn.LayerNorm(d_model)
 
-        self.dropout = nn.Dropout(p=dropout)
-
         self.im_token = nn.Parameter(torch.zeros((1, 1, d_model)))
 
     def forward(self, x, pos_x):
         batch_size = x.size()[0]
         x = self.im_norm(self.im_linear(x)) + self.p_norm(self.pos_linear(pos_x))
-        x = self.dropout(x * .5)
+        x = x * .5
 
         im_token = self.im_token.expand(batch_size, 1, self.d_model)
         x = torch.cat((im_token, x), dim=1)

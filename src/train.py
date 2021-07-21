@@ -12,7 +12,7 @@ from tqdm import tqdm
 
 from data import VQA, get_collate_fn, get_glove_embeddings, dataset_random_split
 from model import New_Net
-from utils import AverageMeter, correct, get_current_lr
+from utils import AverageMeter, get_current_lr, get_sch_fn
 
 
 def main(args):
@@ -29,7 +29,7 @@ def main(args):
     writer = SummaryWriter(log_dir=args.save + '/tensorboard')
 
     # create dataset & data loader
-    dataset = VQA(args.data)
+    dataset = VQA(args.data, min_ans_freq=args.ans_freq, max_qu_length=args.qu_max)
     args.num_classes = len(dataset.answer2index)
     pad_value = dataset.vocab_stoi['<pad>']
     # split dataset to train and test set
@@ -50,7 +50,6 @@ def main(args):
         batch_size=args.batch_size,
         shuffle=True,
         collate_fn=collate_fn,
-        num_workers=2,
         pin_memory=True
     )
     # load glove embeddings
@@ -59,22 +58,16 @@ def main(args):
     else:
         glove_embeddings = get_glove_embeddings(args.glove, dataset.vocab, args.glove)
 
-    model = New_Net(num_classes=args.num_classes, d_model=args.d_model, dropout=args.dropout,
-                    word_embedding=glove_embeddings, num_layers=args.num_layers, num_heads=args.num_heads).cuda()
+    model = New_Net(num_classes=args.num_classes, d_model=args.d_model, attention_dim=args.attention_dim
+                    , dropout=args.dropout, word_embedding=glove_embeddings, num_layers=args.num_layers,
+                    num_heads=args.num_heads).cuda()
 
     num_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print('\nmodel has %dM parameters' % (num_parameters // 1000000))
 
     optimizer = torch.optim.Adam(params=model.parameters(), lr=args.lr)
 
-    # lambda function for scheduler
-    def schedule_fn(x):
-        if x > 9:
-            return 1 / 5
-        else:
-            return 1.0
-
-    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=schedule_fn)
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=get_sch_fn())
     scaler = amp.GradScaler()
 
     epoch = 1
@@ -90,6 +83,7 @@ def main(args):
 
     for e in range(epoch, args.epochs):
         train_loss, train_acc = train(model, optimizer, scaler, train_loader, pad_value, e, args)
+        scheduler.step()
         test_loss, test_acc = None, None
         if args.eval:
             test_loss, test_acc = val(model, test_loader, pad_value)
@@ -116,7 +110,6 @@ def main(args):
         }
         torch.save(checkpoint, '%s/checkpoint.pth' % args.save)
         pd.DataFrame(results, index=range(1, e + 1)).to_csv('%s/log.csv' % args.save, index_label='epoch')
-        scheduler.step()
 
 
 def train(model, optimizer, scaler, train_loader, pad_value, epoch, args):
@@ -125,17 +118,19 @@ def train(model, optimizer, scaler, train_loader, pad_value, epoch, args):
     for i, batch in enumerate(train_loader):
         qu = batch.qu.cuda(non_blocking=True)
         im = batch.im.cuda(non_blocking=True)
+        im_box = batch.im_box.cuda(non_blocking=True)
         label = batch.ans.cuda(non_blocking=True)
         mask = (qu == pad_value)
 
         batch_size = qu.size()[0]
 
         with amp.autocast():
-            output = model(qu, im, mask)
+            output = model(qu, im, im_box, mask)
             loss = F.cross_entropy(output, label)
 
-        results = correct(output, label, topk=(1,))
-        top1.update(results['acc1'], batch_size)
+        pred = output.max(1)[1]
+        correct = (pred == label).sum()
+        top1.update(correct.item(), batch_size)
 
         # optimize
         optimizer.zero_grad()
@@ -163,19 +158,20 @@ def val(model, loader, pad_value):
     for batch in tqdm(loader):
         qu = batch.qu.cuda(non_blocking=True)
         im = batch.im.cuda(non_blocking=True)
+        im_box = batch.im_box.cuda(non_blocking=True)
         label = batch.ans.cuda(non_blocking=True)
         mask = (qu == pad_value)
 
         batch_size = qu.size()[0]
 
         with torch.no_grad():
-            output = model(qu, im, mask)
+            output = model(qu, im, im_box, mask)
             loss = F.cross_entropy(output, label)
             loss_meter.update(loss.item())
 
-            results = correct(output, label, topk=(1,))
-
-            top1.update(results['acc1'], batch_size)
+            pred = output.max(1)[1]
+            correct = (pred == label).sum()
+            top1.update(correct.item(), batch_size)
 
     print('top1 acc: %.2f%%' % (top1.avg() * 100))
     return loss_meter.avg(), top1.avg() * 100
@@ -184,12 +180,15 @@ def val(model, loader, pad_value):
 # data related
 arg_parser = ArgumentParser(description='New Method for visual question answering')
 arg_parser.add_argument('--data', type=str, default='', required=True, help='path to data folder')
-arg_parser.add_argument('--batch_size', default=128, type=int, help='batch size')
+arg_parser.add_argument('--batch_size', default=64, type=int, help='batch size')
 arg_parser.add_argument('--glove', default='', type=str, help='path to glove text file')
+arg_parser.add_argument('--ans_freq', type=int, default=10)
+arg_parser.add_argument('--qu_max', type=int, default=14, help='maximum question length')
 # model related
-arg_parser.add_argument('--d_model', type=int, default=512, help='hidden size dimension')
+arg_parser.add_argument('--d_model', type=int, default=256, help='hidden size dimension')
+arg_parser.add_argument('--attention_dim', type=int, default=256, help='attention dimension for multi head attention')
 arg_parser.add_argument('--num_layers', type=int, default=6, help='number of encoder layers')
-arg_parser.add_argument('--num_heads', type=int, default=8, help='number of attention heads')
+arg_parser.add_argument('--num_heads', type=int, default=4, help='number of attention heads')
 arg_parser.add_argument('--dropout', type=float, default=.2, help='dropout probability')
 # optimization related
 arg_parser.add_argument('--lr', type=float, default=1e-4, help='optimizer learning rate')
