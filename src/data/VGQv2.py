@@ -93,8 +93,11 @@ class VQA(Dataset):
     def __len__(self):
         return len(self.data)
 
-    # convert str question to tensors, each word is represented by its index in vocab
     def questions_as_tensor(self):
+        """
+
+        :return: convert str question to tensors, each word is represented by its index in vocab
+        """
         question_ten = {}
         for qu_id in self.questions:
             qu = self.questions[qu_id]
@@ -109,8 +112,11 @@ class VQA(Dataset):
 
         return question_ten
 
-    # extracts all the answers from annotations and makes the classes for network
     def answer_bank(self):
+        """
+
+        :return: extracts all the answers from annotations and makes the classes for network
+        """
         counter = Counter()
         count = 0
         answer2index = {}
@@ -126,8 +132,11 @@ class VQA(Dataset):
 
         return answer2index
 
-    # makes triplets of data (qu_id, im_id, ans_idx)
     def make_triplets(self):
+        """
+
+        :return: makes triplets of data (qu_id, im_id, ans_idx)
+        """
         data = []
         for item in self.annotations:
             answer = item['multiple_choice_answer']

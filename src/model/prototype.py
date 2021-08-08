@@ -2,12 +2,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
-from torch.distributions.bernoulli import Bernoulli
 
 import math
 
 
-class New_Net(nn.Module):
+class ProtoType(nn.Module):
     def __init__(self, num_classes: int, d_model: int = 512, attention_dim: int = 512, dropout: float = .2,
                  word_embedding: Tensor = None, num_layers: int = 6, num_heads: int = 8):
         """
@@ -20,7 +19,7 @@ class New_Net(nn.Module):
         :param num_layers: encoder number of layers, same for both encoders
         :param num_heads: number of heads in multi head attention
         """
-        super(New_Net, self).__init__()
+        super(ProtoType, self).__init__()
         self.d_model = d_model
         self.attention_dim = attention_dim
         self.num_heads = num_heads
@@ -64,7 +63,7 @@ class New_Net(nn.Module):
         y = self.image_embedding(images_features, image_box)
 
         # add new token to padding mask
-        mask = torch.cat([torch.zeros((batch_size, 1), device=torch.device('cuda:0')), mask], dim=1)
+        mask = torch.cat([torch.zeros((batch_size, 4), device=torch.device('cuda:0')), mask], dim=1)
         quN = x.size()[1]
         imN = y.size()[1]
 
@@ -286,6 +285,7 @@ class Embedding(nn.Module):
         self.d_model = d_model
         # class token
         self.qu_token = nn.Parameter(torch.zeros(1, 1, d_model))
+        self.extra_tokens = nn.Parameter(torch.zeros(1, 3, d_model))
         # word embedding
         num_emd, emd_dim = word_embedding.size()
         self.word_embedding = nn.Embedding(num_emd, emd_dim, _weight=word_embedding)
@@ -310,7 +310,8 @@ class Embedding(nn.Module):
         x = self.dropout(x)
 
         qu_token = self.qu_token.expand(batch_size, 1, self.d_model)
-        x = torch.cat([qu_token, x], dim=1)
+        e_tokens = self.extra_tokens.expand(batch_size, 3, self.d_model)
+        x = torch.cat([qu_token, e_tokens, x], dim=1)
 
         return x
 
@@ -342,24 +343,3 @@ class PositionalEncoding(nn.Module):
 
         x = x + self.pe[:, x.size()[1]]
         return x
-
-
-class Head_Dropout(nn.Module):
-    def __init__(self, p: float):
-        """
-
-        dropout module to drop some of attention heads with means to decrease attention head redundancy
-        :param p: each head gets drop by probability p
-        """
-        super(Head_Dropout, self).__init__()
-        self.p = p
-
-    def forward(self, x: Tensor):
-        """
-
-        :param x: input tensor of size (batch_size, num_heads, N, head_dim)
-        :return: applied dropout
-        """
-
-        distro = Bernoulli(probs=1 - self.p)
-        return x * distro.sample(x.size()[:2]) * (1. / (1 - self.p))
