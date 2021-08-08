@@ -11,7 +11,7 @@ from argparse import ArgumentParser
 from tqdm import tqdm
 
 from data import VQA, get_collate_fn, get_glove_embeddings, dataset_random_split
-from model import New_Net
+from model import ProtoType, New_Net
 from utils import AverageMeter, get_current_lr, get_sch_fn
 
 
@@ -19,14 +19,20 @@ def main(args):
     # result purposes
     if not os.path.exists(args.save):
         os.mkdir(args.save)
-    with open(args.save + '/args.json', 'w') as f:
-        json.dump(args.__dict__, f)
-    results = {'loss/train': [], 'loss/test': [], 'lr': [], 'acc/train': [], 'acc/test': []}
 
     # tensorboard logging
+    results = {'loss/train': [], 'loss/test': [], 'lr': [], 'acc/train': [], 'acc/test': []}
     if not os.path.exists(args.save + '/tensorboard'):
         os.mkdir(args.save + '/tensorboard')
-    writer = SummaryWriter(log_dir=args.save + '/tensorboard')
+    if not os.path.exists(args.save + '/tensorboard/' + args.ex_name):
+        os.mkdir(args.save + '/tensorboard/' + args.ex_name)
+    writer = SummaryWriter(log_dir=args.save + '/tensorboard/' + args.ex_name)
+
+    args.save = args.save + '/' + args.ex_name
+    if not os.path.exists(args.save):
+        os.mkdir(args.save)
+    with open(args.save + '/args.json', 'w') as f:
+        json.dump(args.__dict__, f)
 
     # create dataset & data loader
     dataset = VQA(args.data, min_ans_freq=args.ans_freq, max_qu_length=args.qu_max)
@@ -58,14 +64,14 @@ def main(args):
     else:
         glove_embeddings = get_glove_embeddings(args.glove, dataset.vocab, args.glove)
 
-    model = New_Net(num_classes=args.num_classes, d_model=args.d_model, attention_dim=args.attention_dim
-                    , dropout=args.dropout, word_embedding=glove_embeddings, num_layers=args.num_layers,
+    model = New_Net(num_classes=args.num_classes, d_model=args.d_model, attention_dim=args.attention_dim,
+                    dropout=args.dropout, word_embedding=glove_embeddings, num_layers=args.num_layers,
                     num_heads=args.num_heads).cuda()
 
     num_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print('\nmodel has %dM parameters' % (num_parameters // 1000000))
 
-    optimizer = torch.optim.Adam(params=model.parameters(), lr=args.lr)
+    optimizer = torch.optim.Adam(params=model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=get_sch_fn())
     scaler = amp.GradScaler()
@@ -198,9 +204,16 @@ arg_parser.add_argument('--weight_decay', type=float, default=5e-4, help='optimi
 arg_parser.add_argument('--epochs', type=int, default=50, help='number of training epochs')
 arg_parser.add_argument('--eval', type=bool, default=True, help='if True evaluates model after every epoch')
 arg_parser.add_argument('--save', type=str, default='./run', help='path to save directory')
+arg_parser.add_argument('--ex_name', type=str, default='', help='experiment name')
 arg_parser.add_argument('--resume', type=str, default='', help='path to latest checkpoint')
 arg_parser.add_argument('--log_freq', type=int, default=64, help='frequency of logging')
 
 arguments = arg_parser.parse_args()
+
+arguments.ex_name = ('%s|b%s|d%d|ad%d|l%d|h%d|do%f|lr%f|mo%s|wd%s' % (arguments.ex_name, arguments.batch_size,
+                                                                      arguments.d_model, arguments.attention_dim,
+                                                                      arguments.num_layers, arguments.num_heads,
+                                                                      arguments.dropout, arguments.lr,
+                                                                      arguments.momentum, arguments.weight_decay))
 
 main(arguments)

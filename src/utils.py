@@ -34,13 +34,19 @@ def correct(output, target, topk=(1,)):
     return results
 
 
-def get_sch_fn():
+def get_sch_fn(wp: int = 2, fp: int = 8, hammer: float = 1e-2, decay_scale: float = .2):
+    fp += wp
+    warmup_scale = (1 - hammer) / wp
+
     def schedule_fn(x):
-        if x > 9:
-            return 1 / 5
+        if x < wp:
+            return max(hammer, warmup_scale * x)
+        elif x > fp:
+            return decay_scale ** ((x - fp) // 2)
         else:
-            return 1.0
-    return sch_fn
+            return 1
+
+    return schedule_fn
 
 
 def get_current_lr(optimizer):
