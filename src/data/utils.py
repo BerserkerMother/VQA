@@ -5,9 +5,19 @@ from torchtext.vocab import vocab
 from torch.nn.utils.rnn import pad_sequence
 
 import numpy as np
+import json
 import random
 from collections import Counter
 from tqdm import tqdm
+
+
+def get_answer_dict(path):
+    with open(path, 'r') as f:
+        dic = json.load(f)[0]
+
+    index2answer = [value for value in dic.values()]
+
+    return dic, index2answer
 
 
 # takes questions vocab and GloVe text and returns tensor containing weights
@@ -55,9 +65,11 @@ def make_vocab(questions, tokenizer):
     counter = Counter()
     for question in questions.values():
         counter.update(tokenizer(question))
-    for _ in range(10):
-        counter.update(['<pad>', '<unk>'])
+
     v = vocab(counter, min_freq=5)
+    v.insert_token('<unk>', 0)
+    v.insert_token('<pad>', 1)
+    v.set_default_index(v['<unk>'])
 
     return v
 

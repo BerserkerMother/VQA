@@ -177,6 +177,19 @@ class MultiHeadAttention(nn.Module):
 
         self.linear = nn.Linear(attention_dim, d_model)
 
+        self.init_weights()
+
+    def init_weights(self):
+        nn.init.xavier_uniform_(self.q.weight)
+        nn.init.xavier_uniform_(self.v.weight)
+        nn.init.xavier_uniform_(self.k.weight)
+        nn.init.xavier_uniform_(self.linear.weight)
+
+        nn.init.normal_(self.q.bias)
+        nn.init.normal_(self.v.bias)
+        nn.init.normal_(self.k.bias)
+        nn.init.normal_(self.linear.bias)
+
     def forward(self, q: Tensor, k: Tensor, v: Tensor, mask: Tensor = None) -> Tensor:
         """
 
@@ -207,7 +220,7 @@ class MultiHeadAttention(nn.Module):
 
 
 class MLP(nn.Module):
-    def __init__(self, d_model: int = 512, dropout: float = .2, scale=2):
+    def __init__(self, d_model: int = 512, dropout: float = .2, scale: int = 4):
         """
 
         :param d_model: dimension of model feature space
@@ -220,6 +233,15 @@ class MLP(nn.Module):
         self.fc2 = nn.Linear(scale * d_model, d_model)
 
         self.dropout = nn.Dropout(p=dropout)
+
+        self.init_weights()
+
+    def init_weights(self):
+        nn.init.xavier_uniform_(self.fc1.weight)
+        nn.init.xavier_uniform_(self.fc2.weight)
+
+        nn.init.normal_(self.fc1.bias)
+        nn.init.normal_(self.fc2.bias)
 
     def forward(self, x: Tensor):
         """
@@ -255,6 +277,12 @@ class ImageEmbedding(nn.Module):
         self.p_norm = nn.LayerNorm(d_model)
 
         self.im_token = nn.Parameter(torch.zeros((1, 1, d_model)))
+
+        self.init_weights()
+
+    def init_weights(self):
+        nn.init.xavier_uniform_(self.im_linear.weight)
+        nn.init.normal_(self.im_linear.bias)
 
     def forward(self, x: Tensor, pos_x: Tensor):
         """
@@ -295,6 +323,12 @@ class Embedding(nn.Module):
         self.norm = nn.LayerNorm(d_model)
 
         self.dropout = nn.Dropout(p=dropout)
+
+        self.init_weights()
+
+    def init_weights(self):
+        nn.init.xavier_uniform_(self.qu_fc.weight)
+        nn.init.normal_(self.qu_fc.bias)
 
     def forward(self, x: Tensor):
         """

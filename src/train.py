@@ -35,11 +35,16 @@ def main(args):
         json.dump(args.__dict__, f)
 
     # create dataset & data loader
-    dataset = VQA(args.data, min_ans_freq=args.ans_freq, max_qu_length=args.qu_max)
-    args.num_classes = len(dataset.answer2index)
-    pad_value = dataset.vocab_stoi['<pad>']
+    train_set = VQA(args.data, min_ans_freq=args.ans_freq, split='train', max_qu_length=args.qu_max, answer_bank=None,
+                    vocab=None, ans_json=args.ans_path)
+
+    val_set = VQA(args.data, min_ans_freq=args.ans_freq, split='val', max_qu_length=args.qu_max,
+                  answer_bank=(train_set.answer2index, train_set.index2_answer), vocab=train_set.vocab,
+                  ans_json=args.ans_path)
+
+    args.num_classes = len(train_set.answer2index)
+    pad_value = train_set.vocab_stoi['<pad>']
     # split dataset to train and test set
-    train_set, test_set = dataset_random_split(dataset, ratio=.8, seed=0)
     # gets collate function for data loader
     collate_fn = get_collate_fn(pad_value)
     train_loader = data.DataLoader(
@@ -51,8 +56,8 @@ def main(args):
         pin_memory=True
     )
 
-    test_loader = data.DataLoader(
-        dataset=test_set,
+    val_loader = data.DataLoader(
+        dataset=val_set,
         batch_size=args.batch_size,
         shuffle=True,
         collate_fn=collate_fn,
@@ -62,7 +67,7 @@ def main(args):
     if os.path.exists('%s.pth' % args.glove):
         glove_embeddings = torch.load('%s.pth' % args.glove)
     else:
-        glove_embeddings = get_glove_embeddings(args.glove, dataset.vocab, args.glove)
+        glove_embeddings = get_glove_embeddings(args.glove, train_set.vocab, args.glove)
 
     model = New_Net(num_classes=args.num_classes, d_model=args.d_model, attention_dim=args.attention_dim,
                     dropout=args.dropout, word_embedding=glove_embeddings, num_layers=args.num_layers,
@@ -92,7 +97,7 @@ def main(args):
         scheduler.step()
         test_loss, test_acc = None, None
         if args.eval:
-            test_loss, test_acc = val(model, test_loader, pad_value)
+            test_loss, test_acc = val(model, val_loader, pad_value)
 
         # append results
         results['loss/train'].append(train_loss)
@@ -188,6 +193,7 @@ arg_parser = ArgumentParser(description='New Method for visual question answerin
 arg_parser.add_argument('--data', type=str, default='', required=True, help='path to data folder')
 arg_parser.add_argument('--batch_size', default=64, type=int, help='batch size')
 arg_parser.add_argument('--glove', default='', type=str, help='path to glove text file')
+arg_parser.add_argument('--ans_path', default='', type=str, help='path to answer dictionary')
 arg_parser.add_argument('--ans_freq', type=int, default=10)
 arg_parser.add_argument('--qu_max', type=int, default=14, help='maximum question length')
 # model related
