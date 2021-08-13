@@ -177,7 +177,7 @@ class MultiHeadAttention(nn.Module):
 
         self.linear = nn.Linear(attention_dim, d_model)
 
-        self.init_weights()
+        #self.init_weights()
 
     def init_weights(self):
         nn.init.xavier_uniform_(self.q.weight)
@@ -234,7 +234,7 @@ class MLP(nn.Module):
 
         self.dropout = nn.Dropout(p=dropout)
 
-        self.init_weights()
+        #self.init_weights()
 
     def init_weights(self):
         nn.init.xavier_uniform_(self.fc1.weight)
@@ -278,7 +278,7 @@ class ImageEmbedding(nn.Module):
 
         self.im_token = nn.Parameter(torch.zeros((1, 1, d_model)))
 
-        self.init_weights()
+        #self.init_weights()
 
     def init_weights(self):
         nn.init.xavier_uniform_(self.im_linear.weight)
@@ -324,7 +324,7 @@ class Embedding(nn.Module):
 
         self.dropout = nn.Dropout(p=dropout)
 
-        self.init_weights()
+        #self.init_weights()
 
     def init_weights(self):
         nn.init.xavier_uniform_(self.qu_fc.weight)

@@ -1,7 +1,7 @@
 mkdir data # make data folder
 
 mkdir -p data/mscoco_imgfeat
-mkdir -p data/msmoco_imgfeat/train2014
+mkdir -p data/mscoco_imgfeat/train2014
 mkdir -p data/mscoco_imgfeat/val2014
 wget https://nlp.cs.unc.edu/data/lxmert_data/mscoco_imgfeat/train2014_obj36.zip -P data/mscoco_imgfeat
 unzip data/mscoco_imgfeat/train2014_obj36.zip -d data/mscoco_imgfeat && rm data/mscoco_imgfeat/train2014_obj36.zip
@@ -27,5 +27,5 @@ unzip data/glove.6B.zip -d data/glove && rm data/glove.6B.zip
 rm data/glove/glove.6B.200d.txt data/glove/glove.6B.100d.txt data/glove/glove.6B.50d.txt
 
 # convert tsv tp numpy
-python src/data/tsv_to_npy.py -p  data/mscoco_imgfeat/train2014_obj36.zip -s data/mscoco_imgfeat/train2014
-python src/data/tsv_to_npy.py -p  data/mscoco_imgfeat/val2014_obj36.zip -s data/mscoco_imgfeat/val2014
+python src/data/tsv_to_np.py -p  data/mscoco_imgfeat/train2014_obj36.tsv -s data/mscoco_imgfeat/train2014
+python src/data/tsv_to_np.py -p  data/mscoco_imgfeat/val2014_obj36.tsv -s data/mscoco_imgfeat/val2014
