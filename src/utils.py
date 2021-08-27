@@ -34,7 +34,7 @@ def correct(output, target, topk=(1,)):
     return results
 
 
-def get_sch_fn(wp: int = 2, fp: int = 10, hammer: float = 1e-2, decay_scale: float = .2):
+def get_sch_fn(wp: int = 2, fp: int = 8, hammer: float = 1e-2, decay_scale: float = .2):
     fp += wp
     warmup_scale = (1 - hammer) / wp
 

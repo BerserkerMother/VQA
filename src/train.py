@@ -2,43 +2,24 @@ import torch
 import torch.nn.functional as F
 from torch.utils import data
 from torch.cuda import amp
-from torch.utils.tensorboard import SummaryWriter
 
+import wandb
 import os
 import json
-import pandas as pd
 from argparse import ArgumentParser
 from tqdm import tqdm
 
 from data import VQA, get_collate_fn, get_glove_embeddings, dataset_random_split
-from model import ProtoType, New_Net
+from model import ProtoType, New_Net, Resnet
 from utils import AverageMeter, get_current_lr, get_sch_fn
 
 
 def main(args):
-    # result purposes
-    if not os.path.exists(args.save):
-        os.mkdir(args.save)
-
-    # tensorboard logging
-    results = {'loss/train': [], 'loss/test': [], 'lr': [], 'acc/train': [], 'acc/test': []}
-    if not os.path.exists(args.save + '/tensorboard'):
-        os.mkdir(args.save + '/tensorboard')
-    if not os.path.exists(args.save + '/tensorboard/' + args.ex_name):
-        os.mkdir(args.save + '/tensorboard/' + args.ex_name)
-    writer = SummaryWriter(log_dir=args.save + '/tensorboard/' + args.ex_name)
-
-    args.save = args.save + '/' + args.ex_name
-    if not os.path.exists(args.save):
-        os.mkdir(args.save)
-    with open(args.save + '/args.json', 'w') as f:
-        json.dump(args.__dict__, f)
-
     # create dataset & data loader
-    train_set = VQA(args.data, min_ans_freq=args.ans_freq, split='train', max_qu_length=args.qu_max, answer_bank=None,
-                    vocab=None, ans_json=args.ans_path)
+    train_set = VQA(args.data, resnet=args.resnet, min_ans_freq=args.ans_freq, split='train', max_qu_length=args.qu_max,
+                    answer_bank=None, vocab=None, ans_json=args.ans_path)
 
-    val_set = VQA(args.data, min_ans_freq=args.ans_freq, split='val', max_qu_length=args.qu_max,
+    val_set = VQA(args.data, resnet=args.resnet, min_ans_freq=args.ans_freq, split='val', max_qu_length=args.qu_max,
                   answer_bank=(train_set.answer2index, train_set.index2_answer), vocab=train_set.vocab,
                   ans_json=args.ans_path)
 
@@ -73,6 +54,11 @@ def main(args):
                     dropout=args.dropout, word_embedding=glove_embeddings, num_layers=args.num_layers,
                     num_heads=args.num_heads).cuda()
 
+    if args.resnet:
+        im_feature_extractor = Resnet(pretrained=True, multiple_entity=True).cuda()
+    else:
+        im_feature_extractor = None
+
     num_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print('\nmodel has %dM parameters' % (num_parameters // 1000000))
 
@@ -89,41 +75,33 @@ def main(args):
             optimizer.load_state_dict(checkpoint['optimizer'])
             scheduler.load_state_dict(checkpoint['scheduler'])
             scaler.load_state_dict(checkpoint['scaler'])
-            results = checkpoint['results']
             epoch = checkpoint['epoch'] + 1
 
+    wandb.init(name=args.ex_name, project='VQA', entity='berserkermother', config=args)
     for e in range(epoch, args.epochs):
-        train_loss, train_acc = train(model, optimizer, scaler, train_loader, pad_value, e, args)
+        train_loss, train_acc = train(model, im_feature_extractor, optimizer, scaler, train_loader, pad_value, e, args)
         scheduler.step()
         test_loss, test_acc = None, None
         if args.eval:
-            test_loss, test_acc = val(model, val_loader, pad_value)
-
-        # append results
-        results['loss/train'].append(train_loss)
-        results['acc/train'].append(train_acc)
-        results['loss/test'].append(test_loss)
-        results['acc/test'].append(test_acc)
-        results['lr'].append(get_current_lr(optimizer))
+            test_loss, test_acc = val(model, im_feature_extractor, val_loader, pad_value, args)
 
         # tensorboard logging
-        writer.add_scalars('acc', {'train': train_acc, 'test': test_acc}, global_step=e)
-        writer.add_scalars('loss', {'train': train_loss, 'test': test_loss}, global_step=e)
-        writer.add_scalar('lr', scalar_value=get_current_lr(optimizer), global_step=e)
+        wandb.log({'loss': {'train': train_loss, 'test': test_loss},
+                   'accuracy': {'train': train_acc, 'test': test_acc},
+                   'lr': get_current_lr(optimizer)})
 
-        checkpoint = {
-            'state_dict': model.state_dict(),
-            'optimizer': optimizer.state_dict(),
-            'scheduler': scheduler.state_dict(),
-            'scaler': scaler.state_dict(),
-            'results': results,
-            'epoch': e
-        }
-        torch.save(checkpoint, '%s/checkpoint.pth' % args.save)
-        pd.DataFrame(results, index=range(1, e + 1)).to_csv('%s/log.csv' % args.save, index_label='epoch')
+        if args.save:
+            checkpoint = {
+                'state_dict': model.state_dict(),
+                'optimizer': optimizer.state_dict(),
+                'scheduler': scheduler.state_dict(),
+                'scaler': scaler.state_dict(),
+                'epoch': e
+            }
+            torch.save(checkpoint, '%s/checkpoint.pth' % args.save)
 
 
-def train(model, optimizer, scaler, train_loader, pad_value, epoch, args):
+def train(model, ifx, optimizer, scaler, train_loader, pad_value, epoch, args):
     model.train()
     loss_meter, top1, total_loss = AverageMeter(), AverageMeter(), 0.
     for i, batch in enumerate(train_loader):
@@ -135,8 +113,12 @@ def train(model, optimizer, scaler, train_loader, pad_value, epoch, args):
 
         batch_size = qu.size()[0]
 
+        if args.resnet:
+            with torch.no_grad():
+                im = ifx(im)
+
         with amp.autocast():
-            output = model(qu, im, im_box, mask)
+            output = model(qu, im, im_box, mask, args.resnet)
             loss = F.cross_entropy(output, label)
 
         pred = output.max(1)[1]
@@ -161,7 +143,7 @@ def train(model, optimizer, scaler, train_loader, pad_value, epoch, args):
     return loss_meter.avg(), top1.avg() * 100
 
 
-def val(model, loader, pad_value):
+def val(model, ifx, loader, pad_value, args):
     model.eval()
     top1, loss_meter = AverageMeter(), AverageMeter()
 
@@ -175,8 +157,11 @@ def val(model, loader, pad_value):
 
         batch_size = qu.size()[0]
 
+        if args.resnet:
+            with torch.no_grad():
+                im = ifx(im)
         with torch.no_grad():
-            output = model(qu, im, im_box, mask)
+            output = model(qu, im, im_box, mask, args.resnet)
             loss = F.cross_entropy(output, label)
             loss_meter.update(loss.item())
 
@@ -194,13 +179,14 @@ arg_parser.add_argument('--data', type=str, default='', required=True, help='pat
 arg_parser.add_argument('--batch_size', default=64, type=int, help='batch size')
 arg_parser.add_argument('--glove', default='', type=str, help='path to glove text file')
 arg_parser.add_argument('--ans_path', default='', type=str, help='path to answer dictionary')
-arg_parser.add_argument('--ans_freq', type=int, default=10)
+arg_parser.add_argument('--ans_freq', type=int, default=5)
 arg_parser.add_argument('--qu_max', type=int, default=14, help='maximum question length')
 # model related
 arg_parser.add_argument('--d_model', type=int, default=256, help='hidden size dimension')
 arg_parser.add_argument('--attention_dim', type=int, default=256, help='attention dimension for multi head attention')
 arg_parser.add_argument('--num_layers', type=int, default=6, help='number of encoder layers')
 arg_parser.add_argument('--num_heads', type=int, default=4, help='number of attention heads')
+arg_parser.add_argument('--resnet', type=bool, default=False, help='if True model will use resnet features')
 arg_parser.add_argument('--dropout', type=float, default=.2, help='dropout probability')
 # optimization related
 arg_parser.add_argument('--lr', type=float, default=1e-4, help='optimizer learning rate')
@@ -209,7 +195,7 @@ arg_parser.add_argument('--weight_decay', type=float, default=5e-4, help='optimi
 # training related
 arg_parser.add_argument('--epochs', type=int, default=50, help='number of training epochs')
 arg_parser.add_argument('--eval', type=bool, default=True, help='if True evaluates model after every epoch')
-arg_parser.add_argument('--save', type=str, default='./run', help='path to save directory')
+arg_parser.add_argument('--save', type=str, default='', help='path to save directory')
 arg_parser.add_argument('--ex_name', type=str, default='', help='experiment name')
 arg_parser.add_argument('--resume', type=str, default='', help='path to latest checkpoint')
 arg_parser.add_argument('--log_freq', type=int, default=64, help='frequency of logging')

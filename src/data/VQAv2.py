@@ -3,11 +3,21 @@
 import torch
 from torch.utils.data import Dataset
 from torchtext.data.utils import get_tokenizer
+from torchvision import transforms
 
 import os
 from glob import glob
+from PIL import Image
+
 
 from .utils import *
+
+T = transforms.Compose([
+    transforms.Resize((224, 224)),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                         std=[0.229, 0.224, 0.225])
+])
 
 
 class VQA(Dataset):
@@ -16,7 +26,7 @@ class VQA(Dataset):
     """
 
     def __init__(self, root: str, split: str, ans_json: str, min_ans_freq: int = 10,
-                 max_qu_length: int = 14, answer_bank=None, vocab=None):
+                 max_qu_length: int = 14, answer_bank=None, vocab=None, resnet: bool = False):
         """
 
         :param root: path to root of which datasets are stored
@@ -27,6 +37,7 @@ class VQA(Dataset):
         self.max_qu_length = max_qu_length
         self.ans_json = ans_json
         self.split = split
+        self.resnet = resnet
 
         self.tokenizer = get_tokenizer('basic_english')
 
@@ -76,14 +87,25 @@ class VQA(Dataset):
         self.questions = self.questions_as_tensor()
 
         self.images = {}
-        for path in images_path:
-            path = os.path.join(self.root, path)
-            if os.path.exists(path):
-                for image_path in glob(path + '/*'):
-                    image_id = image_path.split('/')[-1].split('_')[-1].split('.')[0]
-                    if image_id[-1] != 'l':
-                        self.images[str(int(image_id))] = image_path
-                print('%s loaded to images' % path, end=' | ')
+        if resnet:
+            if self.split == 'train':
+                path = '~/VQA/data/mscoco/train2014'
+            else:
+                path = '~/VQA/data/mscoco/val2014'
+
+            for image_path in glob(path + '/*'):
+                image_id = image_path.split('/')[-1].split('_')[-1].split('.')[0]
+                self.images[str(int(image_id))] = image_path
+            print('%s loaded' % self.split)
+        else:
+            for path in images_path:
+                path = os.path.join(self.root, path)
+                if os.path.exists(path):
+                    for image_path in glob(path + '/*'):
+                        image_id = image_path.split('/')[-1].split('_')[-1].split('.')[0]
+                        if image_id[-1] != 'l':
+                            self.images[str(int(image_id))] = image_path
+                    print('%s loaded to images' % path, end=' | ')
         print('images loaded')
 
         print('creating answer bank...')
@@ -103,8 +125,13 @@ class VQA(Dataset):
         qu_id, im_id, ans_idx = self.data[idx]
 
         question = self.questions[qu_id]
-        image = torch.tensor(np.load(self.images[im_id]), dtype=torch.float)
-        image_box = torch.tensor(np.load('%sl.npy' % (self.images[im_id][:-4])), dtype=torch.float)
+        if self.resnet:
+            image = Image.open(self.images[im_id]).convert(mode='RGB')
+            image = T(image)
+            image_box = torch.tensor([1])
+        else:
+            image = torch.tensor(np.load(self.images[im_id]), dtype=torch.float)
+            image_box = torch.tensor(np.load('%sl.npy' % (self.images[im_id][:-4])), dtype=torch.float)
 
         return question, image, image_box, int(ans_idx)
 

@@ -27,19 +27,10 @@ class New_Net(nn.Module):
 
         self.embedding = Embedding(d_model, word_embedding, dropout)  # qu embedding
         self.image_embedding = ImageEmbedding(d_model, 2048, 4, dropout)  # im embedding
+        self.res_transform = nn.Linear(2048, d_model)
 
         # cls token
-        self.cls_token = nn.Parameter(torch.zeros((1, 1, d_model)))
-
-        question_modules = []
-        for i in range(num_layers):
-            question_modules.append(EncoderLayer(d_model, attention_dim, dropout, num_heads))
-        self.question_encoder = nn.ModuleList(question_modules)
-
-        image_modules = []
-        for i in range(num_layers):
-            image_modules.append(EncoderLayer(d_model, attention_dim, dropout, num_heads))
-        self.image_encoder = nn.ModuleList(image_modules)
+        self.cls_token = nn.Parameter(torch.randn((1, 1, d_model)))
 
         # self attention layer
         module_list = []
@@ -49,7 +40,7 @@ class New_Net(nn.Module):
 
         self.decoder = nn.Linear(d_model, num_classes)
 
-    def forward(self, questions: Tensor, images_features: Tensor, image_box: Tensor, mask: Tensor) -> Tensor:
+    def forward(self, questions: Tensor, images_features: Tensor, image_box: Tensor, mask: Tensor, res) -> Tensor:
         """
 
         :param questions: question batch(batch_size, question_length, embedding dim)
@@ -61,21 +52,18 @@ class New_Net(nn.Module):
         batch_size = questions.size()[0]
 
         x = self.embedding(questions)
-        y = self.image_embedding(images_features, image_box)
+        if res:
+            y = self.res_transform(images_features)
+        else:
+            y = self.image_embedding(images_features, image_box)
 
         # add new token to padding mask
-        mask = torch.cat([torch.zeros((batch_size, 1), device=torch.device('cuda:0')), mask], dim=1)
+        # mask = torch.cat([torch.zeros((batch_size, 1), device=torch.device('cuda:0')), mask], dim=1)
         quN = x.size()[1]
         imN = y.size()[1]
 
         # reshape padding masks
         qu_mask, mixed_mask = self.generate_masks(mask, batch_size, quN, imN)
-
-        for module in self.question_encoder:
-            x = module(x, x, qu_mask)
-
-        for module in self.image_encoder:
-            y = module(y, y)
 
         # cat image and question together & add cls token
         cls_token = self.cls_token.expand(batch_size, 1, self.d_model)
@@ -98,16 +86,14 @@ class New_Net(nn.Module):
         :return: given input, outputs resized and expanded mask for question and qu&im encoder
         """
 
-        mask = mask.view(batch_size, 1, quN, 1)
+        mask = mask.view(batch_size, 1, 1, quN)
         # generate question mask
         question_mask = mask.expand(batch_size, self.num_heads, quN, quN)
-        question_mask = question_mask.permute(0, 1, 3, 2)
         # generate mixed mask
         cls_token_mask = torch.zeros((batch_size, 1, 1, 1), device=torch.device('cuda:0'))
-        image_mask = torch.zeros((batch_size, 1, imN, 1), device=torch.device('cuda:0'))
-        mixed_mask = torch.cat([cls_token_mask, mask, image_mask], dim=2)
+        image_mask = torch.zeros((batch_size, 1, 1, imN), device=torch.device('cuda:0'))
+        mixed_mask = torch.cat([cls_token_mask, mask, image_mask], dim=3)
         mixed_mask = mixed_mask.expand(batch_size, self.num_heads, quN + imN + 1, quN + imN + 1)
-        mixed_mask = mixed_mask.permute(0, 1, 3, 2)
 
         return question_mask == True, mixed_mask == True
 
@@ -129,7 +115,8 @@ class EncoderLayer(nn.Module):
         self.norm1 = nn.LayerNorm(d_model)
         self.norm2 = nn.LayerNorm(d_model)
 
-        self.dropout = nn.Dropout(p=dropout)
+        self.drop1 = nn.Dropout(p=dropout)
+        self.drop2 = nn.Dropout(p=dropout)
 
     def forward(self, x: Tensor, y: Tensor, mask: Tensor = None) -> Tensor:
         """
@@ -140,12 +127,14 @@ class EncoderLayer(nn.Module):
         :return: applied pipeline Tensor
         """
         x1 = x
-        x = self.multi_head_attention(x, y, y, mask)
-        x = self.dropout(x) + x1
         x = self.norm1(x)
+        x = self.multi_head_attention(x, y, y, mask)
+        x = self.drop1(x) + x1
 
-        x = self.mlp(x) + x
+        x1 = x
         x = self.norm2(x)
+        x = self.mlp(x)
+        x = self.drop2(x) + x1
 
         return x
 
@@ -177,7 +166,7 @@ class MultiHeadAttention(nn.Module):
 
         self.linear = nn.Linear(attention_dim, d_model)
 
-        #self.init_weights()
+        # self.init_weights()
 
     def init_weights(self):
         nn.init.xavier_uniform_(self.q.weight)
@@ -234,7 +223,7 @@ class MLP(nn.Module):
 
         self.dropout = nn.Dropout(p=dropout)
 
-        #self.init_weights()
+        # self.init_weights()
 
     def init_weights(self):
         nn.init.xavier_uniform_(self.fc1.weight)
@@ -252,13 +241,13 @@ class MLP(nn.Module):
         x = F.relu(self.fc1(x))
         x = self.dropout(x)
         x = self.fc2(x)
-        x = self.dropout(x)
 
         return x
 
 
 class ImageEmbedding(nn.Module):
-    def __init__(self, d_model: int = 512, feature_dim: int = 2048, pos_dim: int = 4, dropout: float = .2):
+    def __init__(self, d_model: int = 512, feature_dim: int = 2048, pos_dim: int = 4, dropout: float = .2,
+                 token: bool = False):
         """
 
         :param d_model: dimension of model feature space
@@ -268,6 +257,7 @@ class ImageEmbedding(nn.Module):
         """
         super(ImageEmbedding, self).__init__()
         self.d_model = d_model
+        self.token = token
         self.dropout = dropout
 
         self.im_linear = nn.Linear(feature_dim, d_model)
@@ -276,9 +266,10 @@ class ImageEmbedding(nn.Module):
         self.im_norm = nn.LayerNorm(d_model)
         self.p_norm = nn.LayerNorm(d_model)
 
-        self.im_token = nn.Parameter(torch.zeros((1, 1, d_model)))
+        if token:
+            self.im_token = nn.Parameter(torch.randn((1, 1, d_model)))
 
-        #self.init_weights()
+        # self.init_weights()
 
     def init_weights(self):
         nn.init.xavier_uniform_(self.im_linear.weight)
@@ -295,14 +286,15 @@ class ImageEmbedding(nn.Module):
         x = self.im_norm(self.im_linear(x)) + self.p_norm(self.pos_linear(pos_x))
         x = x * .5
 
-        im_token = self.im_token.expand(batch_size, 1, self.d_model)
-        x = torch.cat((im_token, x), dim=1)
+        if self.token:
+            im_token = self.im_token.expand(batch_size, 1, self.d_model)
+            x = torch.cat((im_token, x), dim=1)
 
         return x
 
 
 class Embedding(nn.Module):
-    def __init__(self, d_model: int = 512, word_embedding: Tensor = None, dropout: float = .2):
+    def __init__(self, d_model: int = 512, word_embedding: Tensor = None, dropout: float = .2, token: bool = False):
         """
 
         :param d_model: dimension of model feature space
@@ -312,8 +304,10 @@ class Embedding(nn.Module):
         super(Embedding, self).__init__()
 
         self.d_model = d_model
-        # class token
-        self.qu_token = nn.Parameter(torch.zeros(1, 1, d_model))
+        self.token = token
+        if token:
+            # class token
+            self.qu_token = nn.Parameter(torch.randn(1, 1, d_model))
         # word embedding
         num_emd, emd_dim = word_embedding.size()
         self.word_embedding = nn.Embedding(num_emd, emd_dim, _weight=word_embedding)
@@ -324,7 +318,7 @@ class Embedding(nn.Module):
 
         self.dropout = nn.Dropout(p=dropout)
 
-        #self.init_weights()
+        # self.init_weights()
 
     def init_weights(self):
         nn.init.xavier_uniform_(self.qu_fc.weight)
@@ -343,8 +337,9 @@ class Embedding(nn.Module):
         x = self.norm(x)
         x = self.dropout(x)
 
-        qu_token = self.qu_token.expand(batch_size, 1, self.d_model)
-        x = torch.cat([qu_token, x], dim=1)
+        if self.token:
+            qu_token = self.qu_token.expand(batch_size, 1, self.d_model)
+            x = torch.cat([qu_token, x], dim=1)
 
         return x
 
@@ -396,4 +391,4 @@ class Head_Dropout(nn.Module):
         """
 
         distro = Bernoulli(probs=1 - self.p)
-        return x * distro.sample(x.size()[:2]) * (1. / (1 - self.p))
+        return x * distro.sample(x.size()[:2] + (1, 1)).cuda() * (1. / (1 - self.p))
