@@ -133,7 +133,7 @@ class VQA(Dataset):
             image = torch.tensor(np.load(self.images[im_id]), dtype=torch.float)
             image_box = torch.tensor(np.load('%sl.npy' % (self.images[im_id][:-4])), dtype=torch.float)
 
-        return question, image, image_box, int(ans_idx)
+        return question, image, image_box, int(ans_idx), qu_id
 
     def __len__(self):
         return len(self.data)

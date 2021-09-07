@@ -11,7 +11,7 @@ from tqdm import tqdm
 
 from data import VQA, get_collate_fn, get_glove_embeddings, dataset_random_split
 from model import ProtoType, New_Net, Resnet
-from utils import AverageMeter, get_current_lr, get_sch_fn
+from utils import AverageMeter, get_current_lr, get_sch_fn, VQA, VQAEval
 
 
 def main(args):
@@ -83,7 +83,7 @@ def main(args):
         scheduler.step()
         test_loss, test_acc = None, None
         if args.eval:
-            test_loss, test_acc = val(model, im_feature_extractor, val_loader, pad_value, args)
+            test_loss, test_acc = val(model, im_feature_extractor, val_loader, pad_value, args, val_set)
 
         # tensorboard logging
         wandb.log({'loss': {'train': train_loss, 'test': test_loss},
@@ -143,10 +143,11 @@ def train(model, ifx, optimizer, scaler, train_loader, pad_value, epoch, args):
     return loss_meter.avg(), top1.avg() * 100
 
 
-def val(model, ifx, loader, pad_value, args):
+def val(model, ifx, loader, pad_value, args, val_set):
     model.eval()
-    top1, loss_meter = AverageMeter(), AverageMeter()
-
+    loss_meter = AverageMeter()
+    qu_ids = []
+    ans_idx = []
     print('evaluating...')
     for batch in tqdm(loader):
         qu = batch.qu.cuda(non_blocking=True)
@@ -165,12 +166,21 @@ def val(model, ifx, loader, pad_value, args):
             loss = F.cross_entropy(output, label)
             loss_meter.update(loss.item())
 
-            pred = output.max(1)[1]
-            correct = (pred == label).sum()
-            top1.update(correct.item(), batch_size)
+            pred = output.max(1)[1].view(-1)
+            ans_idx += pred.tolist()
+            qu_ids += batch.qu_ids
 
-    print('top1 acc: %.2f%%' % (top1.avg() * 100))
-    return loss_meter.avg(), top1.avg() * 100
+    ans_qu = [{'answer': val_set.index2_answer[idx], 'question_id': qu_ids[idx]} for idx, _ in enumerate(qu_ids)]
+
+    # return loss_meter.avg(), top1.avg() * 100
+    json.dump(ans_qu, open('ans.json', 'w'))
+
+    vqa = VQA('annotations/v2_mscoco_val2014_annotations.json', 'questions/v2_OpenEnded_mscoco_val2014_questions.json')
+    res = vqa.loadRes('ans.json', 'questions/v2_OpenEnded_mscoco_val2014_questions.json')
+    vqaval = VQAEval(vqa, res)
+    vqaval.evaluate()
+    print('acc: %f', vqaval.accuracy['overall'])
+    return loss_meter.avg(), vqaval.accuracy['overall']
 
 
 # data related

@@ -110,13 +110,14 @@ class CustomBatch:
         # qu_list contains list of tensor with variant size
         # im_list contains list of image feature tensors
         # ans_list contains list of answer index
-        qu_list, im_list, im_box, ans_list = zip(*data)
+        qu_list, im_list, im_box, ans_list, qu_ids = zip(*data)
 
         # pads questions to max question length in current batch
         self.qu = pad_sequence(qu_list, padding_value=pad_value).permute(1, 0)
         self.im = torch.stack(im_list, dim=0)
         self.im_box = torch.stack(im_box, dim=0)
         self.ans = torch.tensor(ans_list, dtype=torch.long)
+        self.qu_ids = qu_ids
 
     # pin memory function for data loader
     def pin_memory(self):
