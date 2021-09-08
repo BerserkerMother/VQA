@@ -20,7 +20,7 @@ T = transforms.Compose([
 ])
 
 
-class VQA(Dataset):
+class VQADataset(Dataset):
     """
     dataset contains a dictionary {question id, question}, {image id, image_path}, {question id image id: answer}
     """

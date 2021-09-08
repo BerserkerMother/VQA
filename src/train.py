@@ -9,19 +9,21 @@ import json
 from argparse import ArgumentParser
 from tqdm import tqdm
 
-from data import VQA, get_collate_fn, get_glove_embeddings, dataset_random_split
+from data import VQADataset, get_collate_fn, get_glove_embeddings, dataset_random_split
 from model import ProtoType, New_Net, Resnet
 from utils import AverageMeter, get_current_lr, get_sch_fn, VQA, VQAEval
 
 
 def main(args):
     # create dataset & data loader
-    train_set = VQA(args.data, resnet=args.resnet, min_ans_freq=args.ans_freq, split='train', max_qu_length=args.qu_max,
-                    answer_bank=None, vocab=None, ans_json=args.ans_path)
+    train_set = VQADataset(args.data, resnet=args.resnet, min_ans_freq=args.ans_freq, split='train',
+                           max_qu_length=args.qu_max,
+                           answer_bank=None, vocab=None, ans_json=args.ans_path)
 
-    val_set = VQA(args.data, resnet=args.resnet, min_ans_freq=args.ans_freq, split='val', max_qu_length=args.qu_max,
-                  answer_bank=(train_set.answer2index, train_set.index2_answer), vocab=train_set.vocab,
-                  ans_json=args.ans_path)
+    val_set = VQADataset(args.data, resnet=args.resnet, min_ans_freq=args.ans_freq, split='val',
+                         max_qu_length=args.qu_max,
+                         answer_bank=(train_set.answer2index, train_set.index2_answer), vocab=train_set.vocab,
+                         ans_json=args.ans_path)
 
     args.num_classes = len(train_set.answer2index)
     pad_value = train_set.vocab_stoi['<pad>']
