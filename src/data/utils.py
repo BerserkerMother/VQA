@@ -63,7 +63,7 @@ def get_ans_scores(answers, candidate):
         if answer in candidate:
             scores[candidate[answer]] += 1
 
-    return scores.reshape(1, -1)
+    return scores / 3.
 
 
 def get_glove_embeddings(path: str, index2word, save_path):
@@ -107,13 +107,13 @@ class CustomBatch:
         # qu_list contains list of tensor with variant size
         # im_list contains list of image feature tensors
         # ans_list contains list of answer index
-        qu_list, im_list, im_box, ans_list, qu_ids = zip(*data)
+        qu_ids, qu_list, im_list, im_box, ans_list = zip(*data)
 
         # pads questions to max question length in current batch
         self.qu = pad_sequence(qu_list, padding_value=pad_value).permute(1, 0)
         self.im = torch.stack(im_list, dim=0)
         self.im_box = torch.stack(im_box, dim=0)
-        self.ans = torch.tensor(ans_list, dtype=torch.long)
+        self.ans = torch.stack(ans_list, dim=0)
         self.qu_ids = qu_ids
 
     # pin memory function for data loader

@@ -70,7 +70,7 @@ class New_Net(nn.Module):
             x = module(x, x, mixed_mask)
 
         output = self.decoder(x[:, 0])
-        output = F.sigmoid(output)
+        output = torch.sigmoid(output)
 
         return output
 

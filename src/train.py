@@ -48,7 +48,7 @@ def main(args):
     if os.path.exists('%s.pth' % args.glove):
         glove_embeddings = torch.load('%s.pth' % args.glove)
     else:
-        glove_embeddings = get_glove_embeddings(args.glove, train_set.vocab, args.glove)
+        glove_embeddings = get_glove_embeddings(args.glove, train_set.index2word, args.glove)
 
     model = New_Net(num_classes=args.num_classes, d_model=args.d_model, attention_dim=args.attention_dim,
                     dropout=args.dropout, word_embedding=glove_embeddings, num_layers=args.num_layers,
@@ -110,7 +110,7 @@ def train(model, optimizer, scaler, train_loader, pad_value, epoch, args):
 
         with amp.autocast():
             output = model(qu, im, im_box, mask, args.resnet)
-            loss = F.binary_cross_entropy(output, label)
+            loss = F.binary_cross_entropy_with_logits(output, label, reduction='sum')
 
         pred = output.max(1)[1]
         correct = (pred == label).sum()
@@ -149,14 +149,15 @@ def val(model, loader, pad_value, args, val_set):
 
         with torch.no_grad():
             output = model(qu, im, im_box, mask, args.resnet)
-            loss = F.cross_entropy(output, label)
+            loss = F.binary_cross_entropy_with_logits(output, label)
             loss_meter.update(loss.item())
 
             pred = output.max(1)[1].view(-1)
             ans_idx += pred.tolist()
             qu_ids += batch.qu_ids
 
-    ans_qu = [{'answer': val_set.index2answer[idx], 'question_id': qu_ids[idx]} for idx, _ in enumerate(qu_ids)]
+    ans_qu = [{'answer': val_set.index2answer[ans_idx[idx]], 'question_id': qu_ids[idx]} for idx, _ in
+              enumerate(qu_ids)]
 
     json.dump(ans_qu, open('ans.json', 'w'))
 

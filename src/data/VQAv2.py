@@ -105,7 +105,7 @@ class VQADataset(Dataset):
                     token_idx.append(self.word2index[token] if token in self.word2index else self.word2index['<unk>'])
 
                 self.qu_id2qu_tensor[question_id] = torch.tensor(token_idx, dtype=torch.long)
-                self.qu_id2ans_scr[question_id] = get_ans_scores(ans, candidate_answers)
+                self.qu_id2ans_scr[question_id] = ans
 
                 annotations['annotations'].append(annotation)
 
@@ -121,18 +121,16 @@ class VQADataset(Dataset):
         print('DONE!\nall set, let\'s do some deep learning')
         print('_' * 20)
 
-        # delete un used variables
-        del self.qu_id2qu_text
-
     def __len__(self):
         return len(self.data)
 
+    # make answer scores online
     def __getitem__(self, idx):
         qu_id, im_id = self.data[idx]
 
         qu_tensor = self.qu_id2qu_tensor[qu_id]
         im_feat = torch.tensor(np.load(self.im_id2im_feat_path[im_id]), dtype=torch.float)
         im_box = torch.tensor(np.load(self.im_id2im_box_path[im_id]), dtype=torch.float)
-        answer_scores = self.qu_id2ans_scr[qu_id]
+        answer_scores = torch.tensor(get_ans_scores(self.qu_id2ans_scr[qu_id], self.answer2index))
 
         return qu_id, qu_tensor, im_feat, im_box, answer_scores
