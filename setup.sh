@@ -26,6 +26,9 @@ wget https://nlp.stanford.edu/data/glove.6B.zip -P data
 unzip data/glove.6B.zip -d data/glove && rm data/glove.6B.zip
 rm data/glove/glove.6B.200d.txt data/glove/glove.6B.100d.txt data/glove/glove.6B.50d.txt
 
+# download spacy en
+python3 -m spacy download en-core-web-sm
+
 # convert tsv tp numpy
-python src/data/tsv_to_np.py -p  data/mscoco_imgfeat/train2014_obj36.tsv -s data/mscoco_imgfeat/train2014
-python src/data/tsv_to_np.py -p  data/mscoco_imgfeat/val2014_obj36.tsv -s data/mscoco_imgfeat/val2014
+python3 src/data/tsv_to_npy.py -p  data/mscoco_imgfeat/train2014_obj36.tsv -s data/mscoco_imgfeat/train2014
+python3 src/data/tsv_to_npy.py -p  data/mscoco_imgfeat/val2014_obj36.tsv -s data/mscoco_imgfeat/val2014

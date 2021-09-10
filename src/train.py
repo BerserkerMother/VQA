@@ -9,24 +9,21 @@ import json
 from argparse import ArgumentParser
 from tqdm import tqdm
 
-from data import VQADataset, get_collate_fn, get_glove_embeddings, dataset_random_split
-from model import ProtoType, New_Net, Resnet
+from data import VQADataset, get_glove_embeddings, get_collate_fn, get_answer_dict
+from model import ProtoType, New_Net
 from utils import AverageMeter, get_current_lr, get_sch_fn, VQA, VQAEval
 
 
 def main(args):
     # create dataset & data loader
-    train_set = VQADataset(args.data, resnet=args.resnet, min_ans_freq=args.ans_freq, split='train',
-                           max_qu_length=args.qu_max,
-                           answer_bank=None, vocab=None, ans_json=args.ans_path)
+    train_set = VQADataset(args.data, splits='train', max_questions_length=args.qu_max,
+                           candidate_answers=get_answer_dict(args.candidate_ans), vocab=None)
 
-    val_set = VQADataset(args.data, resnet=args.resnet, min_ans_freq=args.ans_freq, split='val',
-                         max_qu_length=args.qu_max,
-                         answer_bank=(train_set.answer2index, train_set.index2_answer), vocab=train_set.vocab,
-                         ans_json=args.ans_path)
+    val_set = VQADataset(args.data, splits='val', max_questions_length=args.qu_max,
+                         candidate_answers=(train_set.answer2index, train_set.index2answer), vocab=train_set.vocab)
 
     args.num_classes = len(train_set.answer2index)
-    pad_value = train_set.vocab_stoi['<pad>']
+    pad_value = train_set.word2index['<pad>']
     # split dataset to train and test set
     # gets collate function for data loader
     collate_fn = get_collate_fn(pad_value)
@@ -35,15 +32,16 @@ def main(args):
         batch_size=args.batch_size,
         shuffle=True,
         collate_fn=collate_fn,
-        num_workers=2,
+        num_workers=args.num_workers,
         pin_memory=True
     )
 
     val_loader = data.DataLoader(
         dataset=val_set,
         batch_size=args.batch_size,
-        shuffle=True,
+        shuffle=False,
         collate_fn=collate_fn,
+        num_workers=args.num_workers,
         pin_memory=True
     )
     # load glove embeddings
@@ -55,11 +53,6 @@ def main(args):
     model = New_Net(num_classes=args.num_classes, d_model=args.d_model, attention_dim=args.attention_dim,
                     dropout=args.dropout, word_embedding=glove_embeddings, num_layers=args.num_layers,
                     num_heads=args.num_heads).cuda()
-
-    if args.resnet:
-        im_feature_extractor = Resnet(pretrained=True, multiple_entity=True).cuda()
-    else:
-        im_feature_extractor = None
 
     num_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print('\nmodel has %dM parameters' % (num_parameters // 1000000))
@@ -81,11 +74,11 @@ def main(args):
 
     wandb.init(name=args.ex_name, project='VQA', entity='berserkermother', config=args)
     for e in range(epoch, args.epochs):
-        train_loss, train_acc = train(model, im_feature_extractor, optimizer, scaler, train_loader, pad_value, e, args)
+        train_loss, train_acc = train(model, optimizer, scaler, train_loader, pad_value, e, args)
         scheduler.step()
         test_loss, test_acc = None, None
         if args.eval:
-            test_loss, test_acc = val(model, im_feature_extractor, val_loader, pad_value, args, val_set)
+            test_loss, test_acc = val(model, val_loader, pad_value, args, val_set)
 
         # tensorboard logging
         wandb.log({'loss': {'train': train_loss, 'test': test_loss},
@@ -103,7 +96,7 @@ def main(args):
             torch.save(checkpoint, '%s/checkpoint.pth' % args.save)
 
 
-def train(model, ifx, optimizer, scaler, train_loader, pad_value, epoch, args):
+def train(model, optimizer, scaler, train_loader, pad_value, epoch, args):
     model.train()
     loss_meter, top1, total_loss = AverageMeter(), AverageMeter(), 0.
     for i, batch in enumerate(train_loader):
@@ -115,13 +108,9 @@ def train(model, ifx, optimizer, scaler, train_loader, pad_value, epoch, args):
 
         batch_size = qu.size()[0]
 
-        if args.resnet:
-            with torch.no_grad():
-                im = ifx(im)
-
         with amp.autocast():
             output = model(qu, im, im_box, mask, args.resnet)
-            loss = F.cross_entropy(output, label)
+            loss = F.binary_cross_entropy(output, label)
 
         pred = output.max(1)[1]
         correct = (pred == label).sum()
@@ -145,7 +134,7 @@ def train(model, ifx, optimizer, scaler, train_loader, pad_value, epoch, args):
     return loss_meter.avg(), top1.avg() * 100
 
 
-def val(model, ifx, loader, pad_value, args, val_set):
+def val(model, loader, pad_value, args, val_set):
     model.eval()
     loss_meter = AverageMeter()
     qu_ids = []
@@ -158,11 +147,6 @@ def val(model, ifx, loader, pad_value, args, val_set):
         label = batch.ans.cuda(non_blocking=True)
         mask = (qu == pad_value)
 
-        batch_size = qu.size()[0]
-
-        if args.resnet:
-            with torch.no_grad():
-                im = ifx(im)
         with torch.no_grad():
             output = model(qu, im, im_box, mask, args.resnet)
             loss = F.cross_entropy(output, label)
@@ -172,33 +156,34 @@ def val(model, ifx, loader, pad_value, args, val_set):
             ans_idx += pred.tolist()
             qu_ids += batch.qu_ids
 
-    ans_qu = [{'answer': val_set.index2_answer[idx], 'question_id': qu_ids[idx]} for idx, _ in enumerate(qu_ids)]
+    ans_qu = [{'answer': val_set.index2answer[idx], 'question_id': qu_ids[idx]} for idx, _ in enumerate(qu_ids)]
 
-    # return loss_meter.avg(), top1.avg() * 100
     json.dump(ans_qu, open('ans.json', 'w'))
 
-    vqa = VQA('annotations/v2_mscoco_val2014_annotations.json', 'questions/v2_OpenEnded_mscoco_val2014_questions.json')
-    res = vqa.loadRes('ans.json', 'questions/v2_OpenEnded_mscoco_val2014_questions.json')
+    vqa = VQA('%s/val_annotations.json' % args.data, '%s/val_questions.json' % args.data)
+    res = vqa.loadRes('ans.json', '%s/val_questions.json' % args.data)
     vqaval = VQAEval(vqa, res)
     vqaval.evaluate()
     print('acc: %f', vqaval.accuracy['overall'])
+
     return loss_meter.avg(), vqaval.accuracy['overall']
 
 
+# TODO: add splits
 # data related
 arg_parser = ArgumentParser(description='New Method for visual question answering')
 arg_parser.add_argument('--data', type=str, default='', required=True, help='path to data folder')
 arg_parser.add_argument('--batch_size', default=64, type=int, help='batch size')
 arg_parser.add_argument('--glove', default='', type=str, help='path to glove text file')
-arg_parser.add_argument('--ans_path', default='', type=str, help='path to answer dictionary')
+arg_parser.add_argument('--candidate_ans', default='', type=str, help='path to candidate answer json file')
 arg_parser.add_argument('--ans_freq', type=int, default=5)
 arg_parser.add_argument('--qu_max', type=int, default=14, help='maximum question length')
+arg_parser.add_argument('--num_workers', type=int, default=2, help='number of worker to load the data')
 # model related
 arg_parser.add_argument('--d_model', type=int, default=256, help='hidden size dimension')
 arg_parser.add_argument('--attention_dim', type=int, default=256, help='attention dimension for multi head attention')
 arg_parser.add_argument('--num_layers', type=int, default=6, help='number of encoder layers')
 arg_parser.add_argument('--num_heads', type=int, default=4, help='number of attention heads')
-arg_parser.add_argument('--resnet', type=bool, default=False, help='if True model will use resnet features')
 arg_parser.add_argument('--dropout', type=float, default=.2, help='dropout probability')
 # optimization related
 arg_parser.add_argument('--lr', type=float, default=1e-4, help='optimizer learning rate')
@@ -210,7 +195,7 @@ arg_parser.add_argument('--eval', type=bool, default=True, help='if True evaluat
 arg_parser.add_argument('--save', type=str, default='', help='path to save directory')
 arg_parser.add_argument('--ex_name', type=str, default='', help='experiment name')
 arg_parser.add_argument('--resume', type=str, default='', help='path to latest checkpoint')
-arg_parser.add_argument('--log_freq', type=int, default=64, help='frequency of logging')
+arg_parser.add_argument('--log_freq', type=int, default=128, help='frequency of logging')
 
 arguments = arg_parser.parse_args()
 
