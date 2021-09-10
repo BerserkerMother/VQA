@@ -60,7 +60,7 @@ def get_ans_scores(answers, candidate):
     scores = np.zeros((len(candidate)))
 
     for answer in answers:
-        if answer in candidate:
+        if answer in candidate and scores[candidate[answer]] < 3:
             scores[candidate[answer]] += 1
 
     return scores / 3.

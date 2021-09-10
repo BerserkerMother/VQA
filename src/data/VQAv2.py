@@ -30,6 +30,7 @@ class VQADataset(Dataset):
 
         print('processing %s set\nreading json files...' % splits)
         self.annotations, self.questions = {'annotations': []}, {'questions': []}
+        annotations_, questions_ = {'annotations': []}, {'questions': []}
         self.im_id2im_feat_path, self.im_id2im_box_path, self.qu_id2qu_text = {}, {}, {}
         # add all annotations and question JSON files to lists
         # creates (im_id, image_feat_path) & (im_id, image_box_path) dictionary
@@ -40,7 +41,11 @@ class VQADataset(Dataset):
             self.annotations['annotations'] += annotations
             # red corresponding questions
             question_path = os.path.join(self.root, VQAv2_FILENAMES[split + '_qu'])
-            questions = json.load(open(question_path, 'r'))['questions']
+            questions = json.load(open(question_path, 'r'))
+            for key in questions.keys():
+                if key != 'questions':
+                    questions_[key] = questions[key]
+            questions = questions['questions']
             self.questions['questions'] += questions
             for question in questions:
                 self.qu_id2qu_text[str(question['question_id'])] = question['question']
@@ -88,7 +93,6 @@ class VQADataset(Dataset):
         # modifying (im_id: image_feat_path) & (im_id: image_box_path)
 
         # make new question and annotation json for evaluation
-        annotations, questions = {'annotations': []}, {'questions': []}
         for i, annotation in enumerate(self.annotations['annotations']):
             question_id = str(annotation['question_id'])
             image_id = str(annotation['image_id'])
@@ -107,17 +111,20 @@ class VQADataset(Dataset):
                 self.qu_id2qu_tensor[question_id] = torch.tensor(token_idx, dtype=torch.long)
                 self.qu_id2ans_scr[question_id] = ans
 
-                annotations['annotations'].append(annotation)
+                annotations_['annotations'].append(annotation)
+            else:
+                del self.qu_id2qu_text[question_id]
+
 
         for question in self.questions['questions']:
             if str(question['question_id']) in self.qu_id2qu_text:
-                questions['questions'].append(question)
+                questions_['questions'].append(question)
         print('DONE!')
 
         print('saving new annotations and questions to %s' % self.root)
         # save new questions and annotations
-        json.dump(questions, open(self.root + '%s_questions.json' % splits, 'w'))
-        json.dump(annotations, open(self.root + '%s_annotations.json' % splits, 'w'))
+        json.dump(questions_, open(self.root + '%s_questions.json' % splits, 'w'))
+        json.dump(annotations_, open(self.root + '%s_annotations.json' % splits, 'w'))
         print('DONE!\nall set, let\'s do some deep learning')
         print('_' * 20)
 

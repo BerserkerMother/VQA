@@ -109,12 +109,12 @@ def train(model, optimizer, scaler, train_loader, pad_value, epoch, args):
         batch_size = qu.size()[0]
 
         with amp.autocast():
-            output = model(qu, im, im_box, mask, args.resnet)
+            output = model(qu, im, im_box, mask)
             loss = F.binary_cross_entropy_with_logits(output, label, reduction='sum')
 
-        pred = output.max(1)[1]
-        correct = (pred == label).sum()
-        top1.update(correct.item(), batch_size)
+        # pred = output.max(1)[1]
+        # correct = (pred == label).sum()
+        top1.update(0, batch_size)
 
         # optimize
         optimizer.zero_grad()
@@ -148,15 +148,15 @@ def val(model, loader, pad_value, args, val_set):
         mask = (qu == pad_value)
 
         with torch.no_grad():
-            output = model(qu, im, im_box, mask, args.resnet)
-            loss = F.binary_cross_entropy_with_logits(output, label)
+            output = model(qu, im, im_box, mask)
+            loss = F.binary_cross_entropy_with_logits(output, label, reduction='sum')
             loss_meter.update(loss.item())
 
             pred = output.max(1)[1].view(-1)
             ans_idx += pred.tolist()
             qu_ids += batch.qu_ids
 
-    ans_qu = [{'answer': val_set.index2answer[ans_idx[idx]], 'question_id': qu_ids[idx]} for idx, _ in
+    ans_qu = [{'answer': val_set.index2answer[ans_idx[idx]], 'question_id': int(qu_ids[idx])} for idx, _ in
               enumerate(qu_ids)]
 
     json.dump(ans_qu, open('ans.json', 'w'))
@@ -165,7 +165,7 @@ def val(model, loader, pad_value, args, val_set):
     res = vqa.loadRes('ans.json', '%s/val_questions.json' % args.data)
     vqaval = VQAEval(vqa, res)
     vqaval.evaluate()
-    print('acc: %f', vqaval.accuracy['overall'])
+    print('acc: %f' % vqaval.accuracy['overall'])
 
     return loss_meter.avg(), vqaval.accuracy['overall']
 
