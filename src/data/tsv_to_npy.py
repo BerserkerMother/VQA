@@ -14,7 +14,7 @@ def tsv_to_npy(path, save_path):
         See FILENAMES above for the keys in the feature dict.
     """
 
-    if not os.path.exists(save_path):
+    if not os.path.exists(os.path.join(save_path, 'features')):
         os.mkdir(os.path.join(save_path, 'features'))
         os.mkdir(os.path.join(save_path, 'box'))
 
@@ -38,7 +38,7 @@ def tsv_to_npy(path, save_path):
             array.setflags(write=False)
 
             np.save('%s/features/%s.npy' % (save_path, im_id), array)
-            np.save('%s/box/%sl.npy' % (save_path, im_id), loc)
+            np.save('%s/box/%s.npy' % (save_path, im_id), loc)
     elapsed_time = time.time() - start_time
     print("Converted Image Features in file %s in %d seconds." % (path, elapsed_time))
 

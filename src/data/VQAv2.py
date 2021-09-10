@@ -47,16 +47,13 @@ class VQADataset(Dataset):
 
             # create image dic
             im_dir_path = os.path.join(self.root, VQAv2_FILENAMES[split + '_im'])
-            print(glob.glob(im_dir_path + 'features/*'))
-            print(im_dir_path + 'features/*')
             for path in glob.glob(im_dir_path + 'features/*'):
-                im_id = str(int(path.split('/')[-1].split('.')[0]))
+                im_id = str(int(path.split('/')[-1].split('.')[0].split('_')[-1]))
                 self.im_id2im_feat_path[im_id] = path
 
             for path in glob.glob(im_dir_path + 'box/*'):
-                im_id = str(int(path.split('/')[-1].split('.')[0]))
+                im_id = str(int(path.split('/')[-1].split('.')[0].split('_')[-1]))
                 self.im_id2im_box_path[im_id] = path
-        print(list(self.im_id2im_box_path.keys())[:5])
         # check if number of image features  and image box files match
         assert (len(self.im_id2im_feat_path) == len(self.im_id2im_box_path)), \
             'number of image features and boxed doesn\'t match, please check the image files'
@@ -83,7 +80,7 @@ class VQADataset(Dataset):
             self.answer2index, self.index2answer = get_candidate_answers(self.annotations)
         print('DONE!\nnumber of answers: %d' % len(self.index2answer))
 
-        print('making file data list...')
+        print('making data file list...')
         # creating list of data tuples(qu_id, im_id)
         self.data = []
         # creating (qu_id: question_tensor),(qu_i:, ans_scores) dictionaries
@@ -103,15 +100,14 @@ class VQADataset(Dataset):
             ans = get_answers_array(answers)
             if len(question_text) <= max_questions_length and is_answers_in_bank(ans, self.answer2index):
                 self.data.append((question_id, image_id))
-                self.qu_id2qu_tensor[question_id] = torch.tensor([self.word2index[word] for word in question_text],
-                                                                 dtype=torch.long)
+                token_idx = []
+                for token in question_text:
+                    token_idx.append(self.word2index[token] if token in self.word2index else self.word2index['<unk>'])
+
+                self.qu_id2qu_tensor[question_id] = torch.tensor(token_idx, dtype=torch.long)
                 self.qu_id2ans_scr[question_id] = get_ans_scores(ans, candidate_answers)
 
                 annotations['annotations'].append(annotation)
-            else:
-                del self.qu_id2qu_text[question_id]
-                del self.im_id2im_feat_path[image_id]
-                del self.im_id2im_box_path[image_id]
 
         for question in self.questions['questions']:
             if str(question['question_id']) in self.qu_id2qu_text:
@@ -120,9 +116,10 @@ class VQADataset(Dataset):
 
         print('saving new annotations and questions to %s' % self.root)
         # save new questions and annotations
-        json.dump(questions, open(os.path.join(self.root, '%s_questions.json' % splits)))
-        json.dump(annotations, open(os.path.join(self.root, '%s_annotations.json' % splits)))
+        json.dump(questions, open(self.root + '%s_questions.json' % splits, 'w'))
+        json.dump(annotations, open(self.root + '%s_annotations.json' % splits, 'w'))
         print('DONE!\nall set, let\'s do some deep learning')
+        print('_' * 20)
 
         # delete un used variables
         del self.qu_id2qu_text
