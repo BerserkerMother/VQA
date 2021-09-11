@@ -1,201 +1,141 @@
-# main dataset implementation modules
-
+# VQA v2 dataset implementation using extracted bottom up features
 import torch
 from torch.utils.data import Dataset
+from torchtext.vocab import Vocab
 from torchtext.data.utils import get_tokenizer
-from torchvision import transforms
 
+import glob
 import os
-from glob import glob
-from PIL import Image
+import json
+import numpy as np
+
+from .utils import get_vocab, get_candidate_answers, get_ans_scores
+from .path import VQAv2_FILENAMES
 
 
-from .utils import *
-
-T = transforms.Compose([
-    transforms.Resize((224, 224)),
-    transforms.ToTensor(),
-    transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                         std=[0.229, 0.224, 0.225])
-])
-
-
-class VQA(Dataset):
-    """
-    dataset contains a dictionary {question id, question}, {image id, image_path}, {question id image id: answer}
-    """
-
-    def __init__(self, root: str, split: str, ans_json: str, min_ans_freq: int = 10,
-                 max_qu_length: int = 14, answer_bank=None, vocab=None, resnet: bool = False):
+class VQADataset(Dataset):
+    def __init__(self, root: str, splits: str = 'train+val', vocab: Vocab = None, candidate_answers: tuple = None,
+                 max_questions_length: int = 14):
+        """
+        :param root: path to data dir
+        :param splits: define the training sets
+        :param vocab: Vocab object
+        :param candidate_answers: tuple of (answer2index, index2answer)
+        :param max_questions_length: maximum length of question that is allowed
         """
 
-        :param root: path to root of which datasets are stored
-        :param min_ans_freq: minimum answer frequency to include sample
-        """
         self.root = root
-        self.min_ans_freq = min_ans_freq
-        self.max_qu_length = max_qu_length
-        self.ans_json = ans_json
-        self.split = split
-        self.resnet = resnet
+        self.splits = splits.split('+')
 
-        self.tokenizer = get_tokenizer('basic_english')
+        print('processing %s set\nreading json files...' % splits)
+        self.annotations, self.questions = {'annotations': []}, {'questions': []}
+        annotations_, questions_ = {'annotations': []}, {'questions': []}
+        self.im_id2im_feat_path, self.im_id2im_box_path, self.qu_id2qu_text = {}, {}, {}
+        # add all annotations and question JSON files to lists
+        # creates (im_id, image_feat_path) & (im_id, image_box_path) dictionary
+        for split in self.splits:
+            # read corresponding annotations
+            annotation_path = os.path.join(self.root, VQAv2_FILENAMES[split + '_an'])
+            annotations = json.load(open(annotation_path, 'r'))['annotations']
+            self.annotations['annotations'] += annotations
+            # red corresponding questions
+            question_path = os.path.join(self.root, VQAv2_FILENAMES[split + '_qu'])
+            questions = json.load(open(question_path, 'r'))
+            for key in questions.keys():
+                if key != 'questions':
+                    questions_[key] = questions[key]
+            questions = questions['questions']
+            self.questions['questions'] += questions
+            for question in questions:
+                self.qu_id2qu_text[str(question['question_id'])] = question['question']
 
-        # default paths
-        annotations_path = ['annotations/v2_mscoco_train2014_annotations.json',
-                            'annotations/v2_mscoco_val2014_annotations.json']
-        questions_path = ['questions/v2_OpenEnded_mscoco_train2014_questions.json',
-                          'questions/v2_OpenEnded_mscoco_val2014_questions.json']
-        images_path = ['mscoco_imgfeat/train2014', 'mscoco_imgfeat/val2014']
+            # create image dic
+            im_dir_path = os.path.join(self.root, VQAv2_FILENAMES[split + '_im'])
+            for path in glob.glob(im_dir_path + 'features/*'):
+                im_id = str(int(path.split('/')[-1].split('.')[0].split('_')[-1]))
+                self.im_id2im_feat_path[im_id] = path
 
-        if self.split == 'train':
-            annotations_path = [annotations_path[0]]
-            questions_path = [questions_path[0]]
-            images_path = [images_path[0]]
+            for path in glob.glob(im_dir_path + 'box/*'):
+                im_id = str(int(path.split('/')[-1].split('.')[0].split('_')[-1]))
+                self.im_id2im_box_path[im_id] = path
+        # check if number of image features  and image box files match
+        assert (len(self.im_id2im_feat_path) == len(self.im_id2im_box_path)), \
+            'number of image features and boxed doesn\'t match, please check the image files'
+        print('DONE!')
 
-        if self.split == 'val':
-            annotations_path = [annotations_path[1]]
-            questions_path = [questions_path[1]]
-            images_path = [images_path[1]]
+        # create tokenizer
+        tokenizer = get_tokenizer('spacy', language='en_core_web_sm')
 
-        self.annotations = []
-        for path in annotations_path:
-            path = os.path.join(self.root, path)
-            if os.path.exists(path):
-                self.annotations += json.load(open(path, 'r'))['annotations']
-                print('%s loaded to annotations' % path, end=' | ')
-
-        print('annotations loaded')
-
-        self.questions = {}
-        for path in questions_path:
-            path = os.path.join(self.root, path)
-            if os.path.exists(path):
-                questions = json.load(open(path, 'r'))['questions']
-                for question in questions:
-                    qu_id = str(question['question_id'])
-                    qu = question['question']
-                    self.questions[qu_id] = qu
-
-                print('%s loaded to questions' % path, end=' | ')
-        print('questions loaded')
+        print('building the vocabulary...')
         if vocab:
             self.vocab = vocab
         else:
-            self.vocab = make_vocab(self.questions, self.tokenizer)
-        self.vocab_stoi = self.vocab.get_stoi()
-        self.questions = self.questions_as_tensor()
+            self.vocab = get_vocab(self.questions, tokenizer)
 
-        self.images = {}
-        if resnet:
-            if self.split == 'train':
-                path = '~/VQA/data/mscoco/train2014'
+        self.word2index = self.vocab.get_stoi()
+        self.index2word = self.vocab.get_itos()
+        print('DONE!\nvocab size: %d' % len(self.index2word))
+
+        # use candidate answer if it's provided
+        print('preparing candidate answers...')
+        if candidate_answers:
+            self.answer2index, self.index2answer = candidate_answers
+        else:
+            self.answer2index, self.index2answer = get_candidate_answers(self.annotations)
+        print('DONE!\nnumber of answers: %d' % len(self.index2answer))
+
+        print('making data file list...')
+        # creating list of data tuples(qu_id, im_id)
+        self.data = []
+        # creating (qu_id: question_tensor),(qu_i:, ans_scores) dictionaries
+        self.qu_id2qu_tensor, self.qu_id2ans_scr = {}, {}
+        # modifying (im_id: image_feat_path) & (im_id: image_box_path)
+
+        # make new question and annotation json for evaluation
+        for i, annotation in enumerate(self.annotations['annotations']):
+            question_id = str(annotation['question_id'])
+            image_id = str(annotation['image_id'])
+            answers = annotation['answers']
+
+            question_text = tokenizer(self.qu_id2qu_text[question_id])
+
+            # checks if one of the answers is in the candidate answers and question length doesn't surpass the limit
+            ans = annotation['multiple_choice_answer']
+            if len(question_text) <= max_questions_length and ans in self.answer2index:
+                self.data.append((question_id, image_id))
+                token_idx = []
+                for token in question_text:
+                    token_idx.append(self.word2index[token] if token in self.word2index else self.word2index['<unk>'])
+
+                self.qu_id2qu_tensor[question_id] = torch.tensor(token_idx, dtype=torch.long)
+                self.qu_id2ans_scr[question_id] = self.answer2index[ans]
+
+                annotations_['annotations'].append(annotation)
             else:
-                path = '~/VQA/data/mscoco/val2014'
+                del self.qu_id2qu_text[question_id]
 
-            for image_path in glob(path + '/*'):
-                image_id = image_path.split('/')[-1].split('_')[-1].split('.')[0]
-                self.images[str(int(image_id))] = image_path
-            print('%s loaded' % self.split)
-        else:
-            for path in images_path:
-                path = os.path.join(self.root, path)
-                if os.path.exists(path):
-                    for image_path in glob(path + '/*'):
-                        image_id = image_path.split('/')[-1].split('_')[-1].split('.')[0]
-                        if image_id[-1] != 'l':
-                            self.images[str(int(image_id))] = image_path
-                    print('%s loaded to images' % path, end=' | ')
-        print('images loaded')
+        for question in self.questions['questions']:
+            if str(question['question_id']) in self.qu_id2qu_text:
+                questions_['questions'].append(question)
+        print('DONE!')
 
-        print('creating answer bank...')
-        # dictionary mapping each answer to its index
-        if answer_bank:
-            self.answer2index, self.index2_answer = answer_bank
-        else:
-            self.answer2index, self.index2_answer = self.answer_bank()
-
-        print('creating data triplets')
-        self.data = self.make_triplets()
-
-        print('data processing is Done\ndataset contains %d samples and %d unique answers' % (
-            len(self.data), len(self.answer2index)))
-
-    def __getitem__(self, idx):
-        qu_id, im_id, ans_idx = self.data[idx]
-
-        question = self.questions[qu_id]
-        if self.resnet:
-            image = Image.open(self.images[im_id]).convert(mode='RGB')
-            image = T(image)
-            image_box = torch.tensor([1])
-        else:
-            image = torch.tensor(np.load(self.images[im_id]), dtype=torch.float)
-            image_box = torch.tensor(np.load('%sl.npy' % (self.images[im_id][:-4])), dtype=torch.float)
-
-        return question, image, image_box, int(ans_idx), qu_id
+        print('saving new annotations and questions to %s' % self.root)
+        # save new questions and annotations
+        json.dump(questions_, open(self.root + '%s_questions.json' % splits, 'w'))
+        json.dump(annotations_, open(self.root + '%s_annotations.json' % splits, 'w'))
+        print('DONE!\nall set, let\'s do some deep learning')
+        print('_' * 20)
 
     def __len__(self):
         return len(self.data)
 
-    def questions_as_tensor(self):
-        """
+    # make answer scores online
+    def __getitem__(self, idx):
+        qu_id, im_id = self.data[idx]
 
-        :return: convert str question to tensors, each word is represented by its index in vocab
-        """
-        question_ten = {}
-        for qu_id in self.questions:
-            qu = self.questions[qu_id]
-            temp = []
+        qu_tensor = self.qu_id2qu_tensor[qu_id]
+        im_feat = torch.tensor(np.load(self.im_id2im_feat_path[im_id]), dtype=torch.float)
+        im_box = torch.tensor(np.load(self.im_id2im_box_path[im_id]), dtype=torch.float)
+        label = self.qu_id2ans_scr[qu_id]
 
-            for word in self.tokenizer(qu):
-                if word in self.vocab_stoi:
-                    temp.append(self.vocab_stoi[word])
-                else:
-                    temp.append(self.vocab_stoi['<unk>'])
-            question_ten[qu_id] = torch.tensor(temp, dtype=torch.long)
-
-        return question_ten
-
-    def answer_bank(self):
-        """
-
-        :return: extracts all the answers from annotations and makes the classes for network
-        """
-        if self.ans_json:
-            return get_answer_dict(self.ans_json)
-
-        counter = Counter()
-        count = 0
-        answer2index = {}
-
-        for item in self.annotations:
-            answer = item['multiple_choice_answer']
-            counter.update([answer])
-
-        for answer in counter.keys():
-            if counter[answer] >= self.min_ans_freq:
-                answer2index[answer] = count
-                count += 1
-        index2answer = [value for value in answer2index.values()]
-
-        return answer2index, index2answer
-
-    def make_triplets(self):
-        """
-
-        :return: makes triplets of data (qu_id, im_id, ans_idx)
-        """
-        data = []
-        for item in self.annotations:
-            answer = item['multiple_choice_answer']
-
-            if answer in self.answer2index.keys():
-                answer_id = self.answer2index[answer]
-                question_id = str(item['question_id'])
-                image_id = str(item['image_id'])
-
-                if len(self.questions[question_id]) <= self.max_qu_length:
-                    data.append((question_id, image_id, answer_id))
-
-        return data
+        return qu_id, qu_tensor, im_feat, im_box, label

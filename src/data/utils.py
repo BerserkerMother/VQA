@@ -1,35 +1,77 @@
-# data utility modules
 import torch
-from torch.utils.data import Subset
 from torchtext.vocab import vocab
 from torch.nn.utils.rnn import pad_sequence
 
 import numpy as np
-import json
-import random
 from collections import Counter
 from tqdm import tqdm
+import json
 
 
 def get_answer_dict(path):
     with open(path, 'r') as f:
         dic = json.load(f)[0]
 
-    index2answer = [value for value in dic.values()]
+    index2answer = [key for key in dic.keys()]
 
     return dic, index2answer
 
 
-# takes questions vocab and GloVe text and returns tensor containing weights
-def get_glove_embeddings(path, question_vocab, save_path):
+def get_vocab(questions, tokenizer):
     """
+    :param questions: list of questions dictionary
+    :param tokenizer: tokenizer for sentence
+    :return: torch Vocab object
+    """
+    counter = Counter()
+    for question in questions['questions']:
+        counter.update(tokenizer(question['question']))
 
+    v = vocab(counter, min_freq=3)
+    v.insert_token('<unk>', 0)
+    v.insert_token('<pad>', 1)
+    v.set_default_index(v['<unk>'])
+
+    return v
+
+
+def get_candidate_answers(annotations):
+    """
+    :param annotations: list of annotations dictionary
+    :return: tuple(answer2index, index2answer)
+    """
+    return NotImplemented
+
+
+def is_answers_in_bank(answers, candidate):
+    for answer in answers:
+        if answer in candidate:
+            return True
+    return False
+
+
+def get_answers_array(answers):
+    return [ans['answer'] for ans in answers]
+
+
+def get_ans_scores(answers, candidate):
+    scores = np.zeros((len(candidate)))
+
+    for answer in answers:
+        if answer in candidate and scores[candidate[answer]] < 3:
+            scores[candidate[answer]] += 1
+
+    return scores / 3.
+
+
+def get_glove_embeddings(path: str, index2word, save_path):
+    """
     :param path: path to glove embedding text file
-    :param question_vocab: pytorch Vocab object contains all in use words
-    :param save_path: path to save glove embedding pth fie so U won't have to process again
+    :param index2word: index to word list
+    :param save_path: path to save glove embedding pth file so U won't have to process again
     :return: tensor of size (vocab_size, embedding_dim)
     """
-    with open('%s.txt' % path, 'r') as file:
+    with open('%s/glove.6B.300d.txt' % path, 'r') as file:
         text = file.read().split('\n')  # each starts with the character and following it its values
 
     # extract words and features from text file
@@ -38,61 +80,15 @@ def get_glove_embeddings(path, question_vocab, save_path):
         line = line.split(' ')
         word_to_features[line[0]] = [float(num) for num in line[1:]]
 
-    # make desired glove embedding
-    itos = question_vocab.get_itos()
-    glove_embeddings = torch.tensor([])
-    for word in tqdm(itos):
+    glove_embeddings = torch.zeros((len(index2word), 300), dtype=torch.float)
+    for i, word in enumerate(tqdm(index2word[2:])):
         if word in word_to_features.keys():
-            temp = torch.tensor([word_to_features[word]])
-        else:
-            temp = torch.zeros((1, 300))
+            glove_embeddings[i] = torch.tensor([word_to_features[word]], dtype=torch.float)
 
-        glove_embeddings = torch.cat((glove_embeddings, temp))
-
+    glove_embeddings[0] = torch.mean(glove_embeddings[2:], dim=0)
     torch.save(glove_embeddings, '%s.pth' % save_path)
 
     return glove_embeddings
-
-
-# given questions makes vocab
-def make_vocab(questions, tokenizer):
-    """
-
-    :param questions: dic (question_id, question_text)
-    :param tokenizer: english tokenizer
-    :return: pytorch Vocab object
-    """
-    counter = Counter()
-    for question in questions.values():
-        counter.update(tokenizer(question))
-
-    v = vocab(counter, min_freq=5)
-    v.insert_token('<unk>', 0)
-    v.insert_token('<pad>', 1)
-    v.set_default_index(v['<unk>'])
-
-    return v
-
-
-def dataset_random_split(dataset, ratio=.8, seed=0):
-    """
-
-    :param dataset: dataset object to be divided
-    :param ratio: ratio of train samples
-    :param seed: random seed
-    :return: a train and test set
-    """
-    len_data = dataset.__len__()
-    train_size = int(len_data * ratio)
-
-    torch.manual_seed(seed)
-    random.seed(seed)
-    np.random.seed(seed)
-
-    indices = list(range(len_data))
-    np.random.shuffle(indices)
-
-    return Subset(dataset, indices[:train_size]), Subset(dataset, indices[train_size:])
 
 
 class CustomBatch:
@@ -102,7 +98,6 @@ class CustomBatch:
 
     def __init__(self, data, pad_value):
         """
-
         :param data: list of tuples contain question tensor, img feature tensor and answer label
         :param pad_value:
         """
@@ -110,7 +105,7 @@ class CustomBatch:
         # qu_list contains list of tensor with variant size
         # im_list contains list of image feature tensors
         # ans_list contains list of answer index
-        qu_list, im_list, im_box, ans_list, qu_ids = zip(*data)
+        qu_ids, qu_list, im_list, im_box, ans_list = zip(*data)
 
         # pads questions to max question length in current batch
         self.qu = pad_sequence(qu_list, padding_value=pad_value).permute(1, 0)
@@ -131,7 +126,6 @@ class CustomBatch:
 
 def get_collate_fn(pad_value):
     """
-
     :param pad_value: index of pad token in vocab
     :return: a function for data loader collate_fn
     """

@@ -1,4 +1,5 @@
 import csv
+import os
 import sys
 import time
 import numpy as np
@@ -9,10 +10,13 @@ from argparse import ArgumentParser
 def tsv_to_npy(path, save_path):
     """Load object features from tsv file.
     :param path: The path to the tsv file.
-
     :return: A list of image object features where each feature is a dict.
         See FILENAMES above for the keys in the feature dict.
     """
+
+    if not os.path.exists(os.path.join(save_path, 'features')):
+        os.mkdir(os.path.join(save_path, 'features'))
+        os.mkdir(os.path.join(save_path, 'box'))
 
     csv.field_size_limit(sys.maxsize)
     FIELDNAMES = ["img_id", "img_h", "img_w", "objects_id", "objects_conf",
@@ -33,8 +37,8 @@ def tsv_to_npy(path, save_path):
             array = array.reshape(boxes, -1)
             array.setflags(write=False)
 
-            np.save('%s/%s.npy' % (save_path, im_id), array)
-            np.save('%s/%sl.npy' % (save_path, im_id), loc)
+            np.save('%s/features/%s.npy' % (save_path, im_id), array)
+            np.save('%s/box/%s.npy' % (save_path, im_id), loc)
     elapsed_time = time.time() - start_time
     print("Converted Image Features in file %s in %d seconds." % (path, elapsed_time))
 

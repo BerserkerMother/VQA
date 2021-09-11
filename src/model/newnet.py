@@ -27,7 +27,6 @@ class New_Net(nn.Module):
 
         self.embedding = Embedding(d_model, word_embedding, dropout)  # qu embedding
         self.image_embedding = ImageEmbedding(d_model, 2048, 4, dropout)  # im embedding
-        self.res_transform = nn.Linear(2048, d_model)
 
         # cls token
         self.cls_token = nn.Parameter(torch.randn((1, 1, d_model)))
@@ -40,7 +39,7 @@ class New_Net(nn.Module):
 
         self.decoder = nn.Linear(d_model, num_classes)
 
-    def forward(self, questions: Tensor, images_features: Tensor, image_box: Tensor, mask: Tensor, res) -> Tensor:
+    def forward(self, questions: Tensor, images_features: Tensor, image_box: Tensor, mask: Tensor) -> Tensor:
         """
 
         :param questions: question batch(batch_size, question_length, embedding dim)
@@ -52,10 +51,7 @@ class New_Net(nn.Module):
         batch_size = questions.size()[0]
 
         x = self.embedding(questions)
-        if res:
-            y = self.res_transform(images_features)
-        else:
-            y = self.image_embedding(images_features, image_box)
+        y = self.image_embedding(images_features, image_box)
 
         # add new token to padding mask
         # mask = torch.cat([torch.zeros((batch_size, 1), device=torch.device('cuda:0')), mask], dim=1)
