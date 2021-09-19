@@ -25,8 +25,10 @@ class New_Net(nn.Module):
         self.attention_dim = attention_dim
         self.num_heads = num_heads
 
-        self.embedding = Embedding(d_model, word_embedding, dropout)  # qu embedding
-        self.image_embedding = ImageEmbedding(d_model, 2048, 4, dropout)  # im embedding
+        self.embedding = Embedding(
+            d_model, word_embedding, dropout)  # qu embedding
+        self.image_embedding = ImageEmbedding(
+            d_model, 2048, 4, dropout)  # im embedding
 
         # cls token
         self.cls_token = nn.Parameter(torch.randn((1, 1, d_model)))
@@ -34,10 +36,12 @@ class New_Net(nn.Module):
         # self attention layer
         module_list = []
         for i in range(num_layers):
-            module_list.append(EncoderLayer(d_model, attention_dim, dropout, num_heads))
+            module_list.append(EncoderLayer(
+                d_model, attention_dim, dropout, num_heads))
         self.self_attention_encoder = nn.ModuleList(module_list)
 
         self.decoder = nn.Linear(d_model, num_classes)
+        self.linear = nn.Linear(d_model, 1)
 
     def forward(self, questions: Tensor, images_features: Tensor, image_box: Tensor, mask: Tensor) -> Tensor:
         """
@@ -70,7 +74,7 @@ class New_Net(nn.Module):
 
         output = self.decoder(x[:, 0])
 
-        return output
+        return self.linear(output[0])
 
     def generate_masks(self, mask: Tensor, batch_size: int, quN: int, imN: int):
         """
@@ -86,10 +90,13 @@ class New_Net(nn.Module):
         # generate question mask
         question_mask = mask.expand(batch_size, self.num_heads, quN, quN)
         # generate mixed mask
-        cls_token_mask = torch.zeros((batch_size, 1, 1, 1), device=torch.device('cuda:0'))
-        image_mask = torch.zeros((batch_size, 1, 1, imN), device=torch.device('cuda:0'))
+        cls_token_mask = torch.zeros(
+            (batch_size, 1, 1, 1), device=torch.device('cuda:0'))
+        image_mask = torch.zeros(
+            (batch_size, 1, 1, imN), device=torch.device('cuda:0'))
         mixed_mask = torch.cat([cls_token_mask, mask, image_mask], dim=3)
-        mixed_mask = mixed_mask.expand(batch_size, self.num_heads, quN + imN + 1, quN + imN + 1)
+        mixed_mask = mixed_mask.expand(
+            batch_size, self.num_heads, quN + imN + 1, quN + imN + 1)
 
         return question_mask == True, mixed_mask == True
 
@@ -105,7 +112,8 @@ class EncoderLayer(nn.Module):
         pipeline : multi head attention, add & norm, fc, add & norm
         """
         super(EncoderLayer, self).__init__()
-        self.multi_head_attention = MultiHeadAttention(d_model, attention_dim, num_heads, dropout)
+        self.multi_head_attention = MultiHeadAttention(
+            d_model, attention_dim, num_heads, dropout)
         self.mlp = MLP(d_model, dropout)
 
         self.norm1 = nn.LayerNorm(d_model)
@@ -186,9 +194,12 @@ class MultiHeadAttention(nn.Module):
         """
         batch_size = q.size()[0]
 
-        q = self.q(q).view(batch_size, -1, self.num_heads, self.head_size).permute(0, 2, 1, 3)
-        k = self.k(k).view(batch_size, -1, self.num_heads, self.head_size).permute(0, 2, 1, 3)
-        v = self.v(v).view(batch_size, -1, self.num_heads, self.head_size).permute(0, 2, 1, 3)
+        q = self.q(q).view(batch_size, -1, self.num_heads,
+                           self.head_size).permute(0, 2, 1, 3)
+        k = self.k(k).view(batch_size, -1, self.num_heads,
+                           self.head_size).permute(0, 2, 1, 3)
+        v = self.v(v).view(batch_size, -1, self.num_heads,
+                           self.head_size).permute(0, 2, 1, 3)
         scores = torch.matmul(q, k.transpose(2, 3)) / math.sqrt(self.head_size)
         if mask is not None:
             scores = scores.masked_fill(mask, (float('-inf')))
@@ -197,7 +208,8 @@ class MultiHeadAttention(nn.Module):
         attention_weights = self.dropout(attention_weights)
 
         attended_features = torch.matmul(attention_weights, v)
-        attended_features = attended_features.permute(0, 2, 1, 3).contiguous().view(batch_size, -1, self.attention_dim)
+        attended_features = attended_features.permute(
+            0, 2, 1, 3).contiguous().view(batch_size, -1, self.attention_dim)
 
         attended_features = self.linear(attended_features)
 
@@ -279,7 +291,8 @@ class ImageEmbedding(nn.Module):
         :return: applied space transformation and added an image meaning token
         """
         batch_size = x.size()[0]
-        x = self.im_norm(self.im_linear(x)) + self.p_norm(self.pos_linear(pos_x))
+        x = self.im_norm(self.im_linear(x)) + \
+            self.p_norm(self.pos_linear(pos_x))
         x = x * .5
 
         if self.token:
@@ -306,7 +319,8 @@ class Embedding(nn.Module):
             self.qu_token = nn.Parameter(torch.randn(1, 1, d_model))
         # word embedding
         num_emd, emd_dim = word_embedding.size()
-        self.word_embedding = nn.Embedding(num_emd, emd_dim, _weight=word_embedding)
+        self.word_embedding = nn.Embedding(
+            num_emd, emd_dim, _weight=word_embedding)
         self.qu_fc = nn.Linear(emd_dim, d_model)
         self.pos_embedding = PositionalEncoding(d_model)
 
@@ -352,7 +366,8 @@ class PositionalEncoding(nn.Module):
 
         pe = torch.zeros(max_len, d_model)
         position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+        div_term = torch.exp(torch.arange(
+            0, d_model, 2).float() * (-math.log(10000.0) / d_model))
         pe[:, 0::2] = torch.sin(position * div_term)
         pe[:, 1::2] = torch.cos(position * div_term)
         pe = pe.unsqueeze(0)

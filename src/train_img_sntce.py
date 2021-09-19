@@ -1,5 +1,6 @@
 import torch
 import torch.nn.functional as F
+from torch import sigmoid
 from torch.utils import data
 from torch.cuda import amp
 
@@ -23,6 +24,7 @@ def main(args):
                          candidate_answers=(train_set.answer2index, train_set.index2answer), vocab=train_set.vocab)
 
     args.num_classes = len(train_set.answer2index)
+
     pad_value = train_set.word2index['<pad>']
     # split dataset to train and test set
     # gets collate function for data loader
@@ -78,7 +80,7 @@ def main(args):
 
     wandb.init(name=args.ex_name, project='VQA',
                entity='berserkermother', config=args)
-    for e in range(1):
+    for e in range(epoch, args.epochs):
         train_loss, train_acc = train(
             model, optimizer, scaler, train_loader, pad_value, e, args)
         scheduler.step()
@@ -116,9 +118,11 @@ def train(model, optimizer, scaler, train_loader, pad_value, epoch, args):
 
         with amp.autocast():
             output = model(qu, im, im_box, mask)
-            loss = F.cross_entropy(output, label)
+            loss = F.binary_cross_entropy_with_logits(output, label)
 
-        pred = output.max(1)[1]
+        sig_pred = sigmoid(output)
+        pred = (sig_pred > .5).type(torch.uint8)
+
         correct = (pred == label).sum()
         top1.update(correct.item(), batch_size)
 
@@ -142,7 +146,8 @@ def train(model, optimizer, scaler, train_loader, pad_value, epoch, args):
 
 def val(model, loader, pad_value, args, val_set):
     model.eval()
-    loss_meter = AverageMeter()
+
+    loss_meter, acc = AverageMeter(), AverageMeter()
     qu_ids = []
     ans_idx = []
     print('evaluating...')
@@ -157,31 +162,40 @@ def val(model, loader, pad_value, args, val_set):
 
         with torch.no_grad():
             output = model(qu, im, im_box, mask)
-            loss = F.cross_entropy(output, label)
+            loss = F.binary_cross_entropy_with_logits(output, label)
             loss_meter.update(loss.item())
 
-            pred = output.max(1)[1].view(-1)
-            ans_idx += pred.tolist()
-            qu_ids += batch.qu_ids
+            sig_pred = sigmoid(output)
+            pred = (sig_pred > .5).type(torch.uint8)
 
-    ans_qu = [{'answer': val_set.index2answer[ans_idx[idx]], 'question_id': int(qu_ids[idx])} for idx, _ in
-              enumerate(qu_ids)]
+            correct = (pred == label).sum()
 
-    json.dump(ans_qu, open('ans.json', 'w'))
+        acc.update(correct.item(), batch_size)
 
-    vqa = VQA('%s/val_annotations.json' %
-              args.data, '%s/val_questions.json' % args.data)
-    res = vqa.loadRes('ans.json', '%s/val_questions.json' % args.data)
-    vqaval = VQAEval(vqa, res)
-    vqaval.evaluate()
-    print('acc: %f' % vqaval.accuracy['overall'])
+    print('acc: %f' % acc.avg())
 
-    return loss_meter.avg(), vqaval.accuracy['overall']
+    return loss_meter.avg(), acc.avg()
+    #         ans_idx += pred.tolist()
+    #         qu_ids += batch.qu_ids
+
+    # ans_qu = [{'answer': val_set.index2answer[ans_idx[idx]], 'question_id': int(qu_ids[idx])} for idx, _ in
+    #           enumerate(qu_ids)]
+
+    # json.dump(ans_qu, open('ans.json', 'w'))
+
+    # vqa = VQA('%s/val_annotations.json' %
+    #           args.data, '%s/val_questions.json' % args.data)
+    # res = vqa.loadRes('ans.json', '%s/val_questions.json' % args.data)
+    # vqaval = VQAEval(vqa, res)
+    # vqaval.evaluate()
+    # print('acc: %f' % vqaval.accuracy['overall'])
+
+    # return loss_meter.avg(), vqaval.accuracy['overall']
 
 
 # data related
 arg_parser = ArgumentParser(
-    description='New Method for visual question answering')
+    description='trains current architecture on Image-Sentence matching task')
 arg_parser.add_argument('--data', type=str, default='',
                         required=True, help='path to data folder')
 arg_parser.add_argument('--batch_size', default=64,
