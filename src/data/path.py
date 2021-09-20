@@ -6,3 +6,10 @@ VQAv2_FILENAMES = {
     'train_im': 'mscoco_imgfeat/train2014/',
     'val_im': 'mscoco_imgfeat/val2014/'
 }
+
+IMAGE_SENTENCE_MATCHING = {
+    'train_an': 'annotations/captions_train2014.json',
+    'val_an': 'annotations/captions_val2014.json',
+    'train_im': 'mscoco_imgfeat/train2014/features',
+    'val_im': 'mscoco_imgfeat/val2014/features'
+}

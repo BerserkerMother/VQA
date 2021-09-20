@@ -41,9 +41,9 @@ class New_Net(nn.Module):
         self.self_attention_encoder = nn.ModuleList(module_list)
 
         self.decoder = nn.Linear(d_model, num_classes)
-        self.linear = nn.Linear(d_model, 1)
 
-    def forward(self, questions: Tensor, images_features: Tensor, image_box: Tensor, mask: Tensor) -> Tensor:
+    def forward(self, questions: Tensor, images_features: Tensor, image_box: Tensor = None,
+                mask: Tensor = None) -> Tensor:
         """
 
         :param questions: question batch(batch_size, question_length, embedding dim)
@@ -74,7 +74,7 @@ class New_Net(nn.Module):
 
         output = self.decoder(x[:, 0])
 
-        return self.linear(output[0])
+        return output
 
     def generate_masks(self, mask: Tensor, batch_size: int, quN: int, imN: int):
         """
@@ -291,9 +291,12 @@ class ImageEmbedding(nn.Module):
         :return: applied space transformation and added an image meaning token
         """
         batch_size = x.size()[0]
-        x = self.im_norm(self.im_linear(x)) + \
-            self.p_norm(self.pos_linear(pos_x))
-        x = x * .5
+        if pos_x:
+            x = self.im_norm(self.im_linear(x)) + \
+                self.p_norm(self.pos_linear(pos_x))
+            x = x * .5
+        else:
+            x = self.im_norm(self.im_linear(x))
 
         if self.token:
             im_token = self.im_token.expand(batch_size, 1, self.d_model)

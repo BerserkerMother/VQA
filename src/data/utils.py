@@ -5,6 +5,7 @@ from torch.nn.utils.rnn import pad_sequence
 import numpy as np
 from collections import Counter
 from tqdm import tqdm
+import re
 import json
 
 
@@ -17,7 +18,7 @@ def get_answer_dict(path):
     return dic, index2answer
 
 
-def get_vocab(questions, tokenizer):
+def get_vocab_vqa(questions, tokenizer):
     """
     :param questions: list of questions dictionary
     :param tokenizer: tokenizer for sentence
@@ -26,6 +27,24 @@ def get_vocab(questions, tokenizer):
     counter = Counter()
     for question in questions['questions']:
         counter.update(tokenizer(question['question']))
+
+    v = vocab(counter, min_freq=3)
+    v.insert_token('<unk>', 0)
+    v.insert_token('<pad>', 1)
+    v.set_default_index(v['<unk>'])
+
+    return v
+
+
+def get_vocab_ism(data, tokenizer):
+    """
+    :param data: ims data tuples
+    :param tokenizer: tokenizer for sentence
+    :return: torch Vocab object
+    """
+    counter = Counter()
+    for _, caption in data:
+        counter.update(tokenizer(caption))
 
     v = vocab(counter, min_freq=3)
     v.insert_token('<unk>', 0)
@@ -91,7 +110,7 @@ def get_glove_embeddings(path: str, index2word, save_path):
     return glove_embeddings
 
 
-class CustomBatch:
+class CustomBatchVQA:
     """
     Custom batch class so we can pin memory our custom dataset and loader
     """
@@ -124,6 +143,34 @@ class CustomBatch:
         return self
 
 
+class CustomBatchISM:
+    """
+    Custom batch class so we can pin memory our custom dataset and loader
+    """
+
+    def __init__(self, data, pad_value):
+        """
+        :param data: list of tuples contain question tensor, img feature tensor and answer label
+        :param pad_value:
+        """
+
+        # qu_list contains list of tensor with variant size
+        # im_list contains list of image feature tensors
+        # ans_list contains list of answer index
+        im_features_list, captions_list, targets_list = zip(*data)
+
+        # pads questions to max question length in current batch
+        self.caps = pad_sequence(captions_list, padding_value=pad_value, batch_first=True)
+        self.im_feats = torch.stack(im_features_list, dim=0)
+        self.targets = torch.tensor(targets_list, dtype=torch.long)
+
+    # pin memory function for data loader
+    def pin_memory(self):
+        self.caps.pin_memory()
+        self.im_feats.pin_memory()
+        self.targets.pin_memory()
+
+
 def get_collate_fn(pad_value):
     """
     :param pad_value: index of pad token in vocab
@@ -131,6 +178,18 @@ def get_collate_fn(pad_value):
     """
 
     def collate_fn(data):
-        return CustomBatch(data, pad_value)
+        return CustomBatchVQA(data, pad_value)
+
+    return collate_fn
+
+
+def get_ism_collate_fn(pad_value):
+    """
+    :param pad_value: index of pad token in vocab
+    :return: a function for data loader collate_fn
+    """
+
+    def collate_fn(data):
+        return CustomBatchISM(data, pad_value)
 
     return collate_fn

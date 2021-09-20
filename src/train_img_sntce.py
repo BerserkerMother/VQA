@@ -10,25 +10,22 @@ import json
 from argparse import ArgumentParser
 from tqdm import tqdm
 
-from data import VQADataset, get_glove_embeddings, get_collate_fn, get_answer_dict
+from data import IMSDataset, get_glove_embeddings, get_ism_collate_fn
 from model import New_Net
-from utils import AverageMeter, get_current_lr, get_sch_fn, VQA, VQAEval
+from utils import AverageMeter, get_current_lr, get_sch_fn
 
 
+# U fucking moron!
 def main(args):
     # create dataset & data loader
-    train_set = VQADataset(args.data, splits='train', max_questions_length=args.qu_max,
-                           candidate_answers=get_answer_dict(args.candidate_ans), vocab=None)
+    train_set = IMSDataset(args.data, splits='train', vocab=None, neg_prob=args.neg_prob)
 
-    val_set = VQADataset(args.data, splits='val', max_questions_length=args.qu_max,
-                         candidate_answers=(train_set.answer2index, train_set.index2answer), vocab=train_set.vocab)
-
-    args.num_classes = len(train_set.answer2index)
+    val_set = IMSDataset(args.data, splits='val', vocab=train_set.vocab, neg_prob=args.neg_prob)
 
     pad_value = train_set.word2index['<pad>']
     # split dataset to train and test set
     # gets collate function for data loader
-    collate_fn = get_collate_fn(pad_value)
+    collate_fn = get_ism_collate_fn(pad_value)
     train_loader = data.DataLoader(
         dataset=train_set,
         batch_size=args.batch_size,
@@ -53,7 +50,7 @@ def main(args):
         glove_embeddings = get_glove_embeddings(
             args.glove, train_set.index2word, args.glove)
 
-    model = New_Net(num_classes=args.num_classes, d_model=args.d_model, attention_dim=args.attention_dim,
+    model = New_Net(num_classes=1, d_model=args.d_model, attention_dim=args.attention_dim,
                     dropout=args.dropout, word_embedding=glove_embeddings, num_layers=args.num_layers,
                     num_heads=args.num_heads).cuda()
 
@@ -87,7 +84,7 @@ def main(args):
         test_loss, test_acc = None, None
         if args.eval:
             test_loss, test_acc = val(
-                model, val_loader, pad_value, args, val_set)
+                model, val_loader, pad_value)
         # tensorboard logging
         wandb.log({'loss': {'train': train_loss, 'test': test_loss},
                    'accuracy': {'train': train_acc, 'test': test_acc},
@@ -104,26 +101,25 @@ def main(args):
             torch.save(checkpoint, '%s/checkpoint.pth' % args.save)
 
 
+# fix data loader elements
 def train(model, optimizer, scaler, train_loader, pad_value, epoch, args):
     model.train()
     loss_meter, top1, total_loss = AverageMeter(), AverageMeter(), 0.
     for i, batch in enumerate(train_loader):
-        qu = batch.qu.cuda(non_blocking=True)
-        im = batch.im.cuda(non_blocking=True)
-        im_box = batch.im_box.cuda(non_blocking=True)
-        label = batch.ans.cuda(non_blocking=True)
-        mask = (qu == pad_value)
+        caps = batch.caps.cuda(non_blocking=True)
+        im_feats = batch.im_feats.cuda(non_blocking=True)
+        targets = batch.targets.cuda(non_blocking=True)
+        mask = (caps == pad_value)
 
-        batch_size = qu.size()[0]
+        batch_size = caps.size()[0]
 
         with amp.autocast():
-            output = model(qu, im, im_box, mask)
-            loss = F.binary_cross_entropy_with_logits(output, label)
+            output = model(caps, im_feats, mask=mask)
+            loss = F.binary_cross_entropy_with_logits(output, targets)
 
-        sig_pred = sigmoid(output)
-        pred = (sig_pred > .5).type(torch.uint8)
+        pred = torch.where(output > 0, 1, 0)
 
-        correct = (pred == label).sum()
+        correct = (pred == targets).sum()
         top1.update(correct.item(), batch_size)
 
         # optimize
@@ -144,53 +140,33 @@ def train(model, optimizer, scaler, train_loader, pad_value, epoch, args):
     return loss_meter.avg(), top1.avg() * 100
 
 
-def val(model, loader, pad_value, args, val_set):
+def val(model, loader, pad_value):
     model.eval()
 
     loss_meter, acc = AverageMeter(), AverageMeter()
-    qu_ids = []
-    ans_idx = []
     print('evaluating...')
     for batch in tqdm(loader):
-        qu = batch.qu.cuda(non_blocking=True)
-        im = batch.im.cuda(non_blocking=True)
-        im_box = batch.im_box.cuda(non_blocking=True)
-        label = batch.ans.cuda(non_blocking=True)
-        mask = (qu == pad_value)
+        caps = batch.caps.cuda(non_blocking=True)
+        im_feats = batch.im_feats.cuda(non_blocking=True)
+        targets = batch.targets.cuda(non_blocking=True)
+        mask = (caps == pad_value)
 
-        batch_size = qu.size()[0]
+        batch_size = caps.size()[0]
 
         with torch.no_grad():
-            output = model(qu, im, im_box, mask)
-            loss = F.binary_cross_entropy_with_logits(output, label)
+            output = model(caps, im_feats, mask=mask)
+            loss = F.binary_cross_entropy_with_logits(output, targets)
             loss_meter.update(loss.item())
 
-            sig_pred = sigmoid(output)
-            pred = (sig_pred > .5).type(torch.uint8)
+            pred = torch.where(output > 0, 1, 0)
 
-            correct = (pred == label).sum()
+            correct = (pred == targets).sum()
 
         acc.update(correct.item(), batch_size)
 
     print('acc: %f' % acc.avg())
 
     return loss_meter.avg(), acc.avg()
-    #         ans_idx += pred.tolist()
-    #         qu_ids += batch.qu_ids
-
-    # ans_qu = [{'answer': val_set.index2answer[ans_idx[idx]], 'question_id': int(qu_ids[idx])} for idx, _ in
-    #           enumerate(qu_ids)]
-
-    # json.dump(ans_qu, open('ans.json', 'w'))
-
-    # vqa = VQA('%s/val_annotations.json' %
-    #           args.data, '%s/val_questions.json' % args.data)
-    # res = vqa.loadRes('ans.json', '%s/val_questions.json' % args.data)
-    # vqaval = VQAEval(vqa, res)
-    # vqaval.evaluate()
-    # print('acc: %f' % vqaval.accuracy['overall'])
-
-    # return loss_meter.avg(), vqaval.accuracy['overall']
 
 
 # data related
@@ -209,6 +185,8 @@ arg_parser.add_argument('--qu_max', type=int, default=14,
                         help='maximum question length')
 arg_parser.add_argument('--num_workers', type=int,
                         default=2, help='number of worker to load the data')
+arg_parser.add_argument('--neg_prob', type=float,
+                        default=.5, help='probability of a sample pairing with negative caption')
 # model related
 arg_parser.add_argument('--d_model', type=int,
                         default=256, help='hidden size dimension')
