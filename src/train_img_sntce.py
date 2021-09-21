@@ -115,7 +115,7 @@ def train(model, optimizer, scaler, train_loader, pad_value, epoch, args):
 
         with amp.autocast():
             output = model(caps, im_feats, mask=mask)
-            loss = F.binary_cross_entropy_with_logits(output, targets)
+            loss = F.binary_cross_entropy_with_logits(output, targets, reduction='sum')
 
         pred = torch.where(output > 0, 1, 0)
 
@@ -155,7 +155,7 @@ def val(model, loader, pad_value):
 
         with torch.no_grad():
             output = model(caps, im_feats, mask=mask)
-            loss = F.binary_cross_entropy_with_logits(output, targets)
+            loss = F.binary_cross_entropy_with_logits(output, targets, reduction='sum')
             loss_meter.update(loss.item())
 
             pred = torch.where(output > 0, 1, 0)

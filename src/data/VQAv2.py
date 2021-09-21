@@ -9,7 +9,7 @@ import os
 import json
 import numpy as np
 
-from .utils import get_vocab, get_candidate_answers, get_ans_scores
+from .utils import get_vocab_vqa, get_candidate_answers, get_ans_scores
 from .path import VQAv2_FILENAMES
 
 
@@ -70,7 +70,7 @@ class VQADataset(Dataset):
         if vocab:
             self.vocab = vocab
         else:
-            self.vocab = get_vocab(self.questions, tokenizer)
+            self.vocab = get_vocab_vqa(self.questions, tokenizer)
 
         self.word2index = self.vocab.get_stoi()
         self.index2word = self.vocab.get_itos()

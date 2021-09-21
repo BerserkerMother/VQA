@@ -162,13 +162,15 @@ class CustomBatchISM:
         # pads questions to max question length in current batch
         self.caps = pad_sequence(captions_list, padding_value=pad_value, batch_first=True)
         self.im_feats = torch.stack(im_features_list, dim=0)
-        self.targets = torch.tensor(targets_list, dtype=torch.long)
+        self.targets = torch.tensor(targets_list, dtype=torch.float).view(-1, 1)
 
     # pin memory function for data loader
     def pin_memory(self):
         self.caps.pin_memory()
         self.im_feats.pin_memory()
         self.targets.pin_memory()
+
+        return self
 
 
 def get_collate_fn(pad_value):
