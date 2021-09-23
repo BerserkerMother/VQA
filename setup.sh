@@ -27,7 +27,7 @@ unzip data/glove.6B.zip -d data/glove && rm data/glove.6B.zip
 rm data/glove/glove.6B.200d.txt data/glove/glove.6B.100d.txt data/glove/glove.6B.50d.txt
 
 # download spacy en
-python3 -m spacy download en-core-web-sm
+python3 -m spacy download en
 
 # convert tsv tp numpy
 python3 src/data/tsv_to_npy.py -p  data/mscoco_imgfeat/train2014_obj36.tsv -s data/mscoco_imgfeat/train2014
