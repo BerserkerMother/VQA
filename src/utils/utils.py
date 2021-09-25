@@ -39,12 +39,10 @@ def get_sch_fn(wp: int = 2, fp: int = 8, hammer: float = 1e-2, decay_scale: floa
     warmup_scale = (1 - hammer) / wp
 
     def schedule_fn(x):
-        if x < wp:
-            return max(hammer, warmup_scale * x)
-        elif x > fp:
-            return decay_scale ** ((x - fp) // 2)
+        if x < 15:
+            return 1.
         else:
-            return 1
+            return .1
 
     return schedule_fn
 

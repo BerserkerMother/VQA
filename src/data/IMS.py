@@ -31,8 +31,8 @@ class IMSDataset(Dataset):
                 else:
                     dict_[ann['image_id']] = [ann['caption']]
 
-        for key, value in dict_:
-            self.data.append((key, value))
+        for key in dict_.keys():
+            self.data.append((str(int(key)), dict_[key]))
 
         # get image id image path
         self.im_id2im_path = {}
@@ -73,7 +73,7 @@ class IMSDataset(Dataset):
             cap = torch.tensor(cap_, dtype=torch.long)
             caps_tensor.append(cap)
 
-        return im_feat, caps, indices
+        return im_feat, caps_tensor, indices
 
     def __len__(self):
         return len(self.data)
@@ -83,16 +83,16 @@ class IMSDataset(Dataset):
             # get random negative caption
             index = 0
             cap = self.negative_caption(im_id)
-            return cap, index
+            return (cap, index)
         else:
             index = 1
-            return cap, index
+            return (cap, index)
 
     def negative_caption(self, im_id, num_try=5):
         for i in range(num_try):
             idx_ = np.random.choice(np.arange(len(self.data)))
             # if image_ids are different then return the caption
             if im_id != self.data[idx_][0]:
-                return self.data[idx_][1]
+                return self.data[idx_][1][random.randint(0, 4)]
 
         raise Warning('Could not find negative sample within %d tries' % num_try)

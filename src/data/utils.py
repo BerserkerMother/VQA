@@ -43,8 +43,9 @@ def get_vocab_ism(data, tokenizer):
     :return: torch Vocab object
     """
     counter = Counter()
-    for _, caption in data:
-        counter.update(tokenizer(caption))
+    for _, captions in data:
+        for cap in captions:
+            counter.update(tokenizer(cap))
 
     v = vocab(counter, min_freq=3)
     v.insert_token('<unk>', 0)
@@ -167,7 +168,7 @@ class CustomBatchISM:
             for j in range(len(captions_list[i])):
                 im_.append(im_features_list[i])
                 caps_.append(captions_list[i][j])
-                targets_.append(targets[i][j])
+                targets_.append(targets[j])
 
         # pads questions to max question length in current batch
         self.caps = pad_sequence(caps_, padding_value=pad_value, batch_first=True)
