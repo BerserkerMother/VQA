@@ -20,12 +20,19 @@ class IMSDataset(Dataset):
 
         # make data
         self.data = []
+        dict_ = {}
         for split in self.splits:
             path = os.path.join(self.root, IMAGE_SENTENCE_MATCHING[split + '_an'])
             annotations = json.load(open(path, 'r'))['annotations']
             for ann in annotations:
-                # possibly add caption preprocessing to remove , . and unnecessary punctuations
-                self.data.append((str(ann['image_id']), ann['caption']))
+                # TODO: add caption preprocessing to remove , . and unnecessary punctuations
+                if ann['image_id'] in dict_:
+                    dict_[ann['image_id']].append(ann['caption'])
+                else:
+                    dict_[ann['image_id']] = [ann['caption']]
+
+        for key, value in dict_:
+            self.data.append((key, value))
 
         # get image id image path
         self.im_id2im_path = {}
@@ -46,33 +53,40 @@ class IMSDataset(Dataset):
         self.index2word = self.vocab.get_itos()
 
     def __getitem__(self, idx):
-        im_id, cap = self.data[idx]
+        im_id, caps = self.data[idx]
 
         # load image features
         im_feat = np.load(self.im_id2im_path[im_id])
         im_feat = torch.tensor(im_feat, dtype=torch.float32)
 
         # possibly use negative caption
+        caps, indices = zip(*[self.sample_caption(cap, im_id) for cap in caps])
+        caps_tensor = []
+        for cap in caps:
+            # tokenize caption and make tensor
+            cap_ = []
+            for word in self.tokenizer(cap):
+                if cap in self.word2index:
+                    cap_.append(self.word2index[word])
+                else:
+                    cap_.append(self.word2index['<unk>'])
+            cap = torch.tensor(cap_, dtype=torch.long)
+            caps_tensor.append(cap)
+
+        return im_feat, caps, indices
+
+    def __len__(self):
+        return len(self.data)
+
+    def sample_caption(self, cap, im_id):
         if random.random() < self.neg_prob:
             # get random negative caption
             index = 0
             cap = self.negative_caption(im_id)
+            return cap, index
         else:
             index = 1
-
-        # tokenize caption and make tensor
-        cap_ = []
-        for word in self.tokenizer(cap):
-            if cap in self.word2index:
-                cap_.append(self.word2index[word])
-            else:
-                cap_.append(self.word2index['<unk>'])
-        cap = torch.tensor(cap_, dtype=torch.long)
-
-        return im_feat, cap, index
-
-    def __len__(self):
-        return len(self.data)
+            return cap, index
 
     def negative_caption(self, im_id, num_try=5):
         for i in range(num_try):

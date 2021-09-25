@@ -159,10 +159,20 @@ class CustomBatchISM:
         # ans_list contains list of answer index
         im_features_list, captions_list, targets_list = zip(*data)
 
+        im_ = []
+        caps_ = []
+        targets_ = []
+
+        for i, targets in enumerate(targets_list):
+            for j in range(len(captions_list[i])):
+                im_.append(im_features_list[i])
+                caps_.append(captions_list[i][j])
+                targets_.append(targets[i][j])
+
         # pads questions to max question length in current batch
-        self.caps = pad_sequence(captions_list, padding_value=pad_value, batch_first=True)
-        self.im_feats = torch.stack(im_features_list, dim=0)
-        self.targets = torch.tensor(targets_list, dtype=torch.float).view(-1, 1)
+        self.caps = pad_sequence(caps_, padding_value=pad_value, batch_first=True)
+        self.im_feats = torch.stack(im_, dim=0)
+        self.targets = torch.tensor(targets_, dtype=torch.float).view(-1, 1)
 
     # pin memory function for data loader
     def pin_memory(self):
