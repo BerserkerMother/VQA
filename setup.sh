@@ -28,6 +28,7 @@ rm data/glove/glove.6B.200d.txt data/glove/glove.6B.100d.txt data/glove/glove.6B
 
 # download spacy en
 python3 -m spacy download en
+python3 -m spacy download en_core_web_sm
 
 # convert tsv tp numpy
 python3 src/data/tsv_to_npy.py -p  data/mscoco_imgfeat/train2014_obj36.tsv -s data/mscoco_imgfeat/train2014
