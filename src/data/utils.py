@@ -73,8 +73,9 @@ def get_glove_embeddings(path: str, index2word, save_path):
     :param save_path: path to save glove embedding pth file so U won't have to process again
     :return: tensor of size (vocab_size, embedding_dim)
     """
-    with open('%s/glove.6B.300d.txt' % path, 'r') as file:
-        text = file.read().split('\n')  # each starts with the character and following it its values
+    with open('%s/glove.6B.300d.txt' % path, 'r', encoding="mbcs") as file:
+        # each starts with the character and following it its values
+        text = file.read().split('\n')
 
     # extract words and features from text file
     word_to_features = {}
@@ -85,7 +86,8 @@ def get_glove_embeddings(path: str, index2word, save_path):
     glove_embeddings = torch.zeros((len(index2word), 300), dtype=torch.float)
     for i, word in enumerate(tqdm(index2word[2:])):
         if word in word_to_features.keys():
-            glove_embeddings[i] = torch.tensor([word_to_features[word]], dtype=torch.float)
+            glove_embeddings[i] = torch.tensor(
+                [word_to_features[word]], dtype=torch.float)
 
     glove_embeddings[0] = torch.mean(glove_embeddings[2:], dim=0)
     torch.save(glove_embeddings, '%s.pth' % save_path)

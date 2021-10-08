@@ -48,18 +48,22 @@ def main(args):
     if os.path.exists('%s.pth' % args.glove):
         glove_embeddings = torch.load('%s.pth' % args.glove)
     else:
-        glove_embeddings = get_glove_embeddings(args.glove, train_set.index2word, args.glove)
+        glove_embeddings = get_glove_embeddings(
+            args.glove, train_set.index2word, args.glove)
 
     model = New_Net(num_classes=args.num_classes, d_model=args.d_model, attention_dim=args.attention_dim,
                     dropout=args.dropout, word_embedding=glove_embeddings, num_layers=args.num_layers,
                     num_heads=args.num_heads).cuda()
 
-    num_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    num_parameters = sum(p.numel()
+                         for p in model.parameters() if p.requires_grad)
     print('\nmodel has %dM parameters' % (num_parameters // 1000000))
 
-    optimizer = torch.optim.Adam(params=model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    optimizer = torch.optim.Adam(
+        params=model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
-    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=get_sch_fn())
+    scheduler = torch.optim.lr_scheduler.LambdaLR(
+        optimizer, lr_lambda=get_sch_fn())
     scaler = amp.GradScaler()
 
     epoch = 1
@@ -72,13 +76,16 @@ def main(args):
             scaler.load_state_dict(checkpoint['scaler'])
             epoch = checkpoint['epoch'] + 1
 
-    wandb.init(name=args.ex_name, project='VQA', entity='berserkermother', config=args)
+    wandb.init(name=args.ex_name, project='VQA',
+               entity='hojjat_m', config=args)
     for e in range(epoch, args.epochs):
-        train_loss, train_acc = train(model, optimizer, scaler, train_loader, pad_value, e, args)
+        train_loss, train_acc = train(
+            model, optimizer, scaler, train_loader, pad_value, e, args)
         scheduler.step()
         test_loss, test_acc = None, None
         if args.eval:
-            test_loss, test_acc = val(model, val_loader, pad_value, args, val_set)
+            test_loss, test_acc = val(
+                model, val_loader, pad_value, args, val_set)
 
         # tensorboard logging
         wandb.log({'loss': {'train': train_loss, 'test': test_loss},
@@ -110,7 +117,8 @@ def train(model, optimizer, scaler, train_loader, pad_value, epoch, args):
 
         with amp.autocast():
             output = model(qu, im, im_box, mask)
-            loss = F.binary_cross_entropy_with_logits(output, label, reduction='sum')
+            loss = F.binary_cross_entropy_with_logits(
+                output, label, reduction='sum')
 
         # pred = output.max(1)[1]
         # correct = (pred == label).sum()
@@ -149,7 +157,8 @@ def val(model, loader, pad_value, args, val_set):
 
         with torch.no_grad():
             output = model(qu, im, im_box, mask)
-            loss = F.binary_cross_entropy_with_logits(output, label, reduction='sum')
+            loss = F.binary_cross_entropy_with_logits(
+                output, label, reduction='sum')
             loss_meter.update(loss.item())
 
             pred = output.max(1)[1].view(-1)
@@ -161,7 +170,8 @@ def val(model, loader, pad_value, args, val_set):
 
     json.dump(ans_qu, open('ans.json', 'w'))
 
-    vqa = VQA('%s/val_annotations.json' % args.data, '%s/val_questions.json' % args.data)
+    vqa = VQA('%s/val_annotations.json' %
+              args.data, '%s/val_questions.json' % args.data)
     res = vqa.loadRes('ans.json', '%s/val_questions.json' % args.data)
     vqaval = VQAEval(vqa, res)
     vqaval.evaluate()
@@ -172,31 +182,52 @@ def val(model, loader, pad_value, args, val_set):
 
 # TODO: add splits
 # data related
-arg_parser = ArgumentParser(description='New Method for visual question answering')
-arg_parser.add_argument('--data', type=str, default='', required=True, help='path to data folder')
-arg_parser.add_argument('--batch_size', default=64, type=int, help='batch size')
-arg_parser.add_argument('--glove', default='', type=str, help='path to glove text file')
-arg_parser.add_argument('--candidate_ans', default='', type=str, help='path to candidate answer json file')
+arg_parser = ArgumentParser(
+    description='New Method for visual question answering')
+arg_parser.add_argument('--data', type=str, default='',
+                        required=True, help='path to data folder')
+arg_parser.add_argument('--batch_size', default=64,
+                        type=int, help='batch size')
+arg_parser.add_argument('--glove', default='', type=str,
+                        help='path to glove text file')
+arg_parser.add_argument('--candidate_ans', default='',
+                        type=str, help='path to candidate answer json file')
 arg_parser.add_argument('--ans_freq', type=int, default=5)
-arg_parser.add_argument('--qu_max', type=int, default=14, help='maximum question length')
-arg_parser.add_argument('--num_workers', type=int, default=2, help='number of worker to load the data')
+arg_parser.add_argument('--qu_max', type=int, default=14,
+                        help='maximum question length')
+arg_parser.add_argument('--num_workers', type=int,
+                        default=2, help='number of worker to load the data')
 # model related
-arg_parser.add_argument('--d_model', type=int, default=256, help='hidden size dimension')
-arg_parser.add_argument('--attention_dim', type=int, default=256, help='attention dimension for multi head attention')
-arg_parser.add_argument('--num_layers', type=int, default=6, help='number of encoder layers')
-arg_parser.add_argument('--num_heads', type=int, default=4, help='number of attention heads')
-arg_parser.add_argument('--dropout', type=float, default=.2, help='dropout probability')
+arg_parser.add_argument('--d_model', type=int,
+                        default=256, help='hidden size dimension')
+arg_parser.add_argument('--attention_dim', type=int, default=256,
+                        help='attention dimension for multi head attention')
+arg_parser.add_argument('--num_layers', type=int,
+                        default=6, help='number of encoder layers')
+arg_parser.add_argument('--num_heads', type=int, default=4,
+                        help='number of attention heads')
+arg_parser.add_argument('--dropout', type=float,
+                        default=.2, help='dropout probability')
 # optimization related
-arg_parser.add_argument('--lr', type=float, default=1e-4, help='optimizer learning rate')
-arg_parser.add_argument('--momentum', type=float, default=.9, help='optimizer momentum')
-arg_parser.add_argument('--weight_decay', type=float, default=5e-4, help='optimizer weight decay')
+arg_parser.add_argument('--lr', type=float, default=1e-4,
+                        help='optimizer learning rate')
+arg_parser.add_argument('--momentum', type=float,
+                        default=.9, help='optimizer momentum')
+arg_parser.add_argument('--weight_decay', type=float,
+                        default=5e-4, help='optimizer weight decay')
 # training related
-arg_parser.add_argument('--epochs', type=int, default=50, help='number of training epochs')
-arg_parser.add_argument('--eval', type=bool, default=True, help='if True evaluates model after every epoch')
-arg_parser.add_argument('--save', type=str, default='', help='path to save directory')
-arg_parser.add_argument('--ex_name', type=str, default='', help='experiment name')
-arg_parser.add_argument('--resume', type=str, default='', help='path to latest checkpoint')
-arg_parser.add_argument('--log_freq', type=int, default=128, help='frequency of logging')
+arg_parser.add_argument('--epochs', type=int, default=50,
+                        help='number of training epochs')
+arg_parser.add_argument('--eval', type=bool, default=True,
+                        help='if True evaluates model after every epoch')
+arg_parser.add_argument('--save', type=str, default='',
+                        help='path to save directory')
+arg_parser.add_argument('--ex_name', type=str,
+                        default='', help='experiment name')
+arg_parser.add_argument('--resume', type=str, default='',
+                        help='path to latest checkpoint')
+arg_parser.add_argument('--log_freq', type=int,
+                        default=128, help='frequency of logging')
 
 arguments = arg_parser.parse_args()
 
