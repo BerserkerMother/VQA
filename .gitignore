@@ -95,5 +95,7 @@ modules.xml
 
 # pycache directories
 **/__pycache__/
+__pycache__/
+*.pyc
 
 # End of https://www.toptal.com/developers/gitignore/api/pycharm+all
