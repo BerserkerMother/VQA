@@ -42,17 +42,28 @@ class VQADataset(Dataset):
             annotation_path = os.path.join(
                 self.root, self.dataset_filenames[split + '_an'])
             # ! cp has annotations list
-            annotations = json.load(open(annotation_path, 'r'))
+            annotations = json.load(open(annotation_path, 'r'))[
+                'annotations'] if dataset is 'vqa' else json.load(open(annotation_path, 'r'))
             self.annotations['annotations'] += annotations
             # read corresponding questions
             question_path = os.path.join(
                 self.root, self.dataset_filenames[split + '_qu'])
             # ! cp has questions list
             questions = json.load(open(question_path, 'r'))
-            # for key in questions.keys():
-            #     if key != 'questions':
-            #         questions_[key] = questions[key]
-            # questions = questions['questions']
+
+            if dataset is 'vqa':
+                for key in questions.keys():
+                    if key != 'questions':
+                        questions_[key] = questions[key]
+                questions = questions['questions']
+                self.questions['questions'] += questions
+            else:
+                self.questions['questions'] += questions
+                questions_['questions'] += questions
+
+            for question in questions:
+                self.qu_id2qu_text[str(question['question_id'])
+                                   ] = question['question']
 
             self.questions['questions'] += questions
             questions_['questions'] += questions

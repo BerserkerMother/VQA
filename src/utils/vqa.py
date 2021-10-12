@@ -3,7 +3,7 @@ __version__ = '0.9'
 
 # Interface for accessing the VQA dataset.
 
-# This code is based on the code written by Tsung-Yi Lin for MSCOCO Python API available at the following link: 
+# This code is based on the code written by Tsung-Yi Lin for MSCOCO Python API available at the following link:
 # (https://github.com/pdollar/coco/blob/master/PythonAPI/pycocotools/coco.py).
 
 # The following functions are defined:
@@ -86,11 +86,14 @@ class VQA:
             anns = self.dataset['annotations']
         else:
             if not len(imgIds) == 0:
-                anns = sum([self.imgToQA[imgId] for imgId in imgIds if imgId in self.imgToQA], [])
+                anns = sum([self.imgToQA[imgId]
+                           for imgId in imgIds if imgId in self.imgToQA], [])
             else:
                 anns = self.dataset['annotations']
-            anns = anns if len(quesTypes) == 0 else [ann for ann in anns if ann['question_type'] in quesTypes]
-            anns = anns if len(ansTypes) == 0 else [ann for ann in anns if ann['answer_type'] in ansTypes]
+            anns = anns if len(quesTypes) == 0 else [
+                ann for ann in anns if ann['question_type'] in quesTypes]
+            anns = anns if len(ansTypes) == 0 else [
+                ann for ann in anns if ann['answer_type'] in ansTypes]
         ids = [ann['question_id'] for ann in anns]
         return ids
 
@@ -110,11 +113,14 @@ class VQA:
             anns = self.dataset['annotations']
         else:
             if not len(quesIds) == 0:
-                anns = sum([self.qa[quesId] for quesId in quesIds if quesId in self.qa], [])
+                anns = sum([self.qa[quesId]
+                           for quesId in quesIds if quesId in self.qa], [])
             else:
                 anns = self.dataset['annotations']
-            anns = anns if len(quesTypes) == 0 else [ann for ann in anns if ann['question_type'] in quesTypes]
-            anns = anns if len(ansTypes) == 0 else [ann for ann in anns if ann['answer_type'] in ansTypes]
+            anns = anns if len(quesTypes) == 0 else [
+                ann for ann in anns if ann['question_type'] in quesTypes]
+            anns = anns if len(ansTypes) == 0 else [
+                ann for ann in anns if ann['answer_type'] in ansTypes]
         ids = [ann['image_id'] for ann in anns]
         return ids
 
@@ -151,11 +157,11 @@ class VQA:
         """
         res = VQA()
         res.questions = json.load(open(quesFile))
-        res.dataset['info'] = copy.deepcopy(self.questions['info'])
-        res.dataset['task_type'] = copy.deepcopy(self.questions['task_type'])
-        res.dataset['data_type'] = copy.deepcopy(self.questions['data_type'])
-        res.dataset['data_subtype'] = copy.deepcopy(self.questions['data_subtype'])
-        res.dataset['license'] = copy.deepcopy(self.questions['license'])
+        # res.dataset['info'] = copy.deepcopy(self.questions['info'])
+        # res.dataset['task_type'] = copy.deepcopy(self.questions['task_type'])
+        # res.dataset['data_type'] = copy.deepcopy(self.questions['data_type'])
+        # res.dataset['data_subtype'] = copy.deepcopy(self.questions['data_subtype'])
+        # res.dataset['license'] = copy.deepcopy(self.questions['license'])
 
         print('Loading and preparing results...     ')
         time_t = datetime.datetime.utcnow()
@@ -166,14 +172,15 @@ class VQA:
             'Results do not correspond to current VQA set. Either the results do not have predictions for all question ids in annotation file or there is atleast one question id that does not belong to the question ids in the annotation file.'
         for ann in anns:
             quesId = ann['question_id']
-            if res.dataset['task_type'] == 'Multiple Choice':
-                assert ann['answer'] in self.qqa[quesId][
-                    'multiple_choices'], 'predicted answer is not one of the multiple choices'
+            # if res.dataset['task_type'] == 'Multiple Choice':
+            #     assert ann['answer'] in self.qqa[quesId][
+            #         'multiple_choices'], 'predicted answer is not one of the multiple choices'
             qaAnn = self.qa[quesId]
             ann['image_id'] = qaAnn['image_id']
             ann['question_type'] = qaAnn['question_type']
             ann['answer_type'] = qaAnn['answer_type']
-        print('DONE (t=%0.2fs)' % ((datetime.datetime.utcnow() - time_t).total_seconds()))
+        print('DONE (t=%0.2fs)' %
+              ((datetime.datetime.utcnow() - time_t).total_seconds()))
 
         res.dataset['annotations'] = anns
         res.createIndex()

@@ -16,10 +16,10 @@ from utils import AverageMeter, get_current_lr, get_sch_fn, VQA, VQAEval
 
 def main(args):
     # create dataset & data loader
-    train_set = VQADataset(args.data, splits='train', max_questions_length=args.qu_max,
+    train_set = VQADataset(args.data, dataset='vqa_cp', splits='train', max_questions_length=args.qu_max,
                            candidate_answers=get_answer_dict(args.candidate_ans), vocab=None)
 
-    val_set = VQADataset(args.data, splits='val', max_questions_length=args.qu_max,
+    val_set = VQADataset(args.data, dataset='vqa_cp', splits='val', max_questions_length=args.qu_max,
                          candidate_answers=(train_set.answer2index, train_set.index2answer), vocab=train_set.vocab)
 
     args.num_classes = len(train_set.answer2index)

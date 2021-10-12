@@ -1,8 +1,6 @@
 mkdir data # make data folder
 
 mkdir -p data/mscoco_imgfeat
-mkdir -p data/mscoco_imgfeat/train2014
-mkdir -p data/mscoco_imgfeat/val2014
 wget https://nlp.cs.unc.edu/data/lxmert_data/mscoco_imgfeat/train2014_obj36.zip -P data/mscoco_imgfeat
 unzip data/mscoco_imgfeat/train2014_obj36.zip -d data/mscoco_imgfeat && rm data/mscoco_imgfeat/train2014_obj36.zip
 wget https://nlp.cs.unc.edu/data/lxmert_data/mscoco_imgfeat/val2014_obj36.zip -P data/mscoco_imgfeat
@@ -29,7 +27,7 @@ python3 -m spacy download en
 python3 -m spacy download en_core_web_sm
 
 # convert tsv tp numpy
-python3 src/data/tsv_to_npy.py -p  data/mscoco_imgfeat/train2014_obj36.tsv -s data/mscoco_imgfeat/train2014
-python3 src/data/tsv_to_npy.py -p  data/mscoco_imgfeat/val2014_obj36.tsv -s data/mscoco_imgfeat/val2014
+python3 src/data/tsv_to_npy.py -p  data/mscoco_imgfeat/train2014_obj36.tsv -s data/mscoco_imgfeat
+python3 src/data/tsv_to_npy.py -p  data/mscoco_imgfeat/val2014_obj36.tsv -s data/mscoco_imgfeat
 
 pip install -U wandb torchtext torchvision scipy
